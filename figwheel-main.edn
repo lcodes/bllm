@@ -1,0 +1,3 @@
+{:connect-url "ws://[[client-hostname]]:[[server-port]]/figwheel-connect"
+ :open-url false
+ :cljs-devtools false}

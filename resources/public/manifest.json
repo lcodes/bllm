@@ -1,0 +1,22 @@
+{
+  "name": "The REPL",
+  "short_name": "repl",
+  "description": "REPL: Research, Education, Production, in Lisp!",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "landscape",
+  "theme_color": "#420690",
+  "background_color": "#042069",
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

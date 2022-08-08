@@ -1,0 +1,28 @@
+#+TITLE: Blacklight Love Machine
+
+A WebGPU in ClojureScript.
+
+* Research, Education, Production, and Lisp!
+
+After a weekend of looking at WebGPU specs, firefox sources and tons of internet
+documents... a wild WebGPU triangle appears!
+
+- [-] App setup, display a triangle
+- [ ] Add a frame/camera uniform buffer
+- [ ] Meta shader macros, generate bindings
+- [ ] Meshes and textures, working with data
+- [ ] Materials, parameterized effect shaders
+- [ ] Surfaces, parameterized 3D model shaders
+
+* About the Name
+
+Naming things is hard, naming projects is impossibly hard. That's why I leave it
+to whatever I find in the moment.
+
+Just a few days ago, I learned =The Mars Volta=, one of the bands ever, released
+two new singles called [[https://www.youtube.com/watch?v=Oybn7Sfsutc][Blacklight Shine]] and [[https://www.youtube.com/watch?v=HVJtsRHEdoo][Graveyard Love]].
+
+Earlier that day, I was listening to Edguy's [[https://www.youtube.com/watch?v=-y3CMlvrkN0][Lavatory Love Machine]] for the first
+time in a decade. Then the mashup just became the name.
+
+It speaks of the infinite shades inside a living system, which is lovely!
