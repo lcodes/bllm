@@ -14,6 +14,17 @@ documents... a wild WebGPU triangle appears!
 - [ ] Materials, parameterized effect shaders
 - [ ] Surfaces, parameterized 3D model shaders
 
+* How to run?
+
+#+BEGIN_SRC shell
+npm install # Ensures Stats.js and gl-matrix are exposed to ClojureScript.
+#+END_SRC
+
+There's no production build yet. Everything runs from the REPL.
+
+In Emacs/cider, run =cider-jack-in-cljs= to launch the environment, then navigate
+to =http://localhost:9500/=. Feel free to contribute setups of other editors!
+
 * About the Name
 
 Naming things is hard, naming projects is impossibly hard. That's why I leave it
