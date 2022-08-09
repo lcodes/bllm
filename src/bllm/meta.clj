@@ -1,5 +1,6 @@
 (ns bllm.meta
-  "Don't mind the system behind the curtain.")
+  "Don't mind the system behind the curtain."
+  (:refer-clojure :exclude [defstruct]))
 
 ;; Names without a space are reserved for meta attributes and schematics.
 
