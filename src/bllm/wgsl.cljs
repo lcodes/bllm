@@ -2,6 +2,7 @@
   "One shadergraph to rule the WebGPU Shading Language.
 
   Specification found at https://www.w3.org/TR/WGSL/"
+  (:require-macros [bllm.wgsl])
   (:require [bllm.meta :refer [defenum]]
             [bllm.util :refer [def1]]))
 

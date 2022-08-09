@@ -1,5 +1,10 @@
 #+TITLE: Blacklight Love Machine
 
+#+BEGIN_QUOTE
+The enjoyment of one's tools is an essential ingredient of successful work. --
+Donald E. Knuth
+#+END_QUOTE
+
 A WebGPU in ClojureScript.
 
 * Research, Education, Production, and Lisp!
@@ -24,6 +29,23 @@ There's no production build yet. Everything runs from the REPL.
 
 In Emacs/cider, run =cider-jack-in-cljs= to launch the environment, then navigate
 to =http://localhost:9500/=. Feel free to contribute setups of other editors!
+
+* Imaginative Software Development
+
+Don't try to control the process. Be creative and let things happen. Just see
+where they take you.
+
+The browser is a perfect environment for this kind of application. There are
+enough technologies and APIs available to effectively consider it an operating
+system in its own right. The JavaScript virtual machine allows functions to be
+redefined at runtime and =ClojureScript= takes full advantage of this feature.
+
+This application is entirely developed while it runs at full framerate. The goal
+is to provide a fun playground to learn development, quickly experiment with new
+ideas and maybe even produce interactive content interactively at the Lisp REPL.
+
+The web is making incredible progress nowadays; [[https://twitter.com/markdeloura/status/1546664511599300609][Spacelancers]] for example is the
+result of an Unreal Engine game exported to the browser. Both WebGL and WebGPU!
 
 * About the Name
 
