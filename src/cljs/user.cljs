@@ -2,8 +2,9 @@
   "Development entry point. Attaches a few strings before launching the app."
   (:require [npm.stats.js  :as Stats]
             [devtools.core :as devtools]
-            [bllm.util     :as util]
-            [repl.app      :as app]))
+            [bllm.util     :as util :refer [def1]]
+            [repl.app      :as app]
+            [repl.error    :as error]))
 
 (defn upsert-html-node
   "Locate the matching 'tag#id' HTML element, or create it."
@@ -24,9 +25,17 @@
 
 ;; Launch the application right away. TODO setup dev plugins
 
-(defonce app-ctx
+(def1 app-ctx
   (do ;(devtools/install! [:formatters :hints]) TODO chrome devtools only
       (app/init fix-scripts)
       :ok))
 
 ;; TODO hook Statsjs into the tick loop
+
+(defn ^:before-load on-before-load []
+  ;; TODO start collecting changes
+  )
+
+(defn ^:after-load on-after-load []
+  ;; TODO stop collecting changes, batch execute
+  (repl.error/exceptional-resume))

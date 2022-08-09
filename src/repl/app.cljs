@@ -32,8 +32,7 @@
     (demo/post)
     (core/post)
     (catch :default e
-      (disp/cancel-frame)
-      (error/exceptional-pause e))))
+      (error/exceptional-pause e (util/callback tick)))))
 
 (defn- start
   "Launch the simulation. All systems are initialized at this point."

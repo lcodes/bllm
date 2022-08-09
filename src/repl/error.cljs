@@ -1,6 +1,7 @@
 (ns repl.error
   "Simple application-wide error handling."
-  (:require [bllm.util :as util]))
+  (:require [bllm.disp :as disp]
+            [bllm.util :as util :refer [def1]]))
 
 (defn- on-window-error [msg file line col error]
   (js/console.error msg error))
@@ -22,7 +23,22 @@
 ;;; Unhandled Frame Exception
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn exceptional-pause [e]
+(def1 ^:private exceptional-resume-fn
+  nil)
+
+(defn exceptional-pause
+  "Called when a thrown `Error` bubbles all the way to the app's frame handler."
+  [e resume-fn]
   (js/console.log e)
-  ;; TODO pause display, overlay error on screen, click/eval to resume
+  (disp/cancel-frame)
+  (set! exceptional-resume-fn resume-fn)
+  ;; TODO overlay error on screen, click to resume
   )
+
+(defn exceptional-resume
+  "Called as a figwheel hook, or when clicking the error overlay."
+  []
+  (when exceptional-resume-fn
+    ;; TODO remove overlay
+    (disp/request-frame exceptional-resume-fn)
+    (set! exceptional-resume-fn nil)))
