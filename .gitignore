@@ -1,0 +1,23 @@
+# Base
+.DS_Store
+.idea
+*.log
+
+# Clojure
+/target
+/classes
+/checkouts
+profiles.clj
+pom.xml
+pom.xml.asc
+*.jar
+*.class
+/.clj-*
+/.lein-*
+/.lsp
+/.nrepl-port
+/.prepl-port
+/.cpcache
+
+# Node
+/node_modules
