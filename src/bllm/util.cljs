@@ -85,7 +85,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def ^:private ansi-re
-  "Match all ANSI escape sequences."
+  "Matches all ANSI escape sequences."
   (js/RegExp. "\\x1b(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])" "g"))
 
 (defn strip-ansi
