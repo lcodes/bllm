@@ -4,6 +4,7 @@
             [bllm.disp  :as disp]
             [bllm.html  :as html]
             [bllm.util  :as util :refer [def1]]
+            [repl.asset :as asset]
             [repl.demo  :as demo]
             [repl.error :as error]))
 
