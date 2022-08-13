@@ -41,14 +41,13 @@
 
 (defflag AttributeFlag
   ""
-  [; packed attribute infos
+  ; packed attribute infos
    ;; WGSL | JS | CLJS (where can it live)
    ;;
-   ])
+   )
 
 (defenum AttributeKind
   "Built-in attribute schematics."
-  []
   ;; prim
   ;; enum / flag
   ;;
@@ -56,11 +55,12 @@
 
 (defenum SchematicKind
   "Built-in schematic schematics."
-  [])
+  )
 
 (defenum PrimitiveKind
   "Built-in primitive types. More than JavaScript, to also model WGSL & binary."
   {:suffix -t}
+  #_
   [;; Atoms.
    never any void bool ; Logical bottom, top, unit and bit types.
    uni str sym key     ; Textual character, string, symbol and keyword.

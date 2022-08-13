@@ -1,6 +1,8 @@
 (ns bllm.util
-  "The missing macros from ClojureScript. Highly opinionated."
-  (:require [clojure.string :as str]
+  "The missing macros from ClojureScript. Highly opinionated.
+
+  Also contains miscellaneous utility functions used by other macro modules."
+  (:require [clojure.string      :as str]
             [clojure.tools.macro :as macro]))
 
 
@@ -24,8 +26,8 @@
 
 (defn wrap-do [& forms] `(do ~@forms))
 
-(defn kebab->pascal [s]
-  (str/replace (name s) #"^\w|-\w"
+(defn- kebab-capitalize [s re]
+  (str/replace (name s) re
                (fn [^String m]
                  (->> (.length m)
                       (dec)
@@ -33,9 +35,47 @@
                       (Character/toUpperCase)
                       (str)))))
 
-(comment
-  (kebab->pascal :test-hello-world)
-  )
+(defn kebab->camel [s]
+  (kebab-capitalize s #"-\w"))
+
+(defn kebab->pascal [s]
+  (kebab-capitalize s #"^\w|-\w"))
+
+(comment (kebab->camel  :test-hello-world)
+         (kebab->pascal :test-hello-world))
+
+(def flatten1 (partial apply concat))
+
+(defn align [alignment size]
+  (let [a (dec alignment)]
+    (bit-and (+ a size) (bit-not a))))
+
+(defn to-js
+  "Emits the given data form as a JavaScript literal."
+  [form]
+  (cond
+    (map? form)
+    `(cljs.core/js-obj
+      ~@(flatten1
+         (for [[k v] form]
+           [(name k) (to-js v)])))
+
+    (set? form)
+    `(js/Set.
+      (cljs.core/array
+       ~@(map to-js form)))
+
+    (or (seq? form) (vector? form))
+    `(cljs.core/array
+      ~@(map to-js form))
+
+    :else form))
+
+(comment (to-js '(hello world))
+         (to-js [1 2 3])
+         (to-js #{1 2 3})
+         (to-js {:a "hello" :b 123})
+         (to-js {:a [1 2 3]}))
 
 
 ;;; Conditional Compilation -> Matching the different build profiles.
@@ -64,18 +104,39 @@
      ~@body))
 
 
-;;; Prelude -> Miscellaneous functions complementing cljs.core.
+;;; Prelude -> Miscellaneous macros complementing cljs.core.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro def1
-  "Better, shorter `defonce`."
-  ([sym init]
-   (if (dev?)
-     `(defonce ~sym ~init)
-     `(def ~sym ~init))) ; Advanced compilation doesn't fully remove `defonce`.
-  ([sym docstring init]
-   `(bllm.util/def1 ~(with-meta sym {:doc docstring})
+(defmacro defm
+  "When `defmacro` is used to write `defmacro`. I'm So Meta, Even This Acronym."
+  {:arglists '([name doc-string? attr-map? [params*] body])}
+  [sym & args]
+  (let [[sym [[m-sym & m-args] & body]] (macro/name-with-attributes sym args)]
+    `(defmacro ~sym
+       ;; The inner docstring is already part of the meta. Notice the symmetry.
+       {:arglists '([~'name ~'doc-string? ~'attr-map?
+                     ~@(or (some-> sym meta :args eval) m-args)])}
+       [sym# & args#]
+       (let [[~m-sym [~@m-args]] (macro/name-with-attributes sym# args#)]
+         ~@body)))) ; Here body is assumed to expand into the final `def`.
+
+(defm defconst
+  "Better, shorter `def ^:const`. Allows the defined var to be redefined."
+  [sym init]
+  (wrap-do
+   (when (dev?) ; Constants can't be redefined, but they can be undefined.
+     `(cljs.core/ns-unmap
+       (quote ~(.getName *ns*))
+       (quote ~sym)))
+   `(def ~(vary-meta sym assoc :const true) ; All this for a meta property.
       ~init)))
+
+(defm def1 ; Gonna be honest, this font makes it look like `defl`. Font why?!
+  "Better, shorter `defonce`. Accepts a doc-string and attributes map."
+  [sym init]
+  (if (dev?)
+    `(defonce ~sym ~init)
+    `(def ~sym ~init))) ; Advanced compilation doesn't fully remove `defonce`.
 
 
 ;;; DWIM -> Direct access to JavaScript's good parts, or "I know what I'm doing"

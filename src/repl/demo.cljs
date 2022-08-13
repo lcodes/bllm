@@ -1,8 +1,10 @@
 (ns repl.demo
   (:require [bllm.gpu  :as gpu]
             [bllm.disp :as disp]
+            [bllm.meta :as meta]
             [bllm.time :as time]
-            [bllm.util :as util :refer [def1]]))
+            [bllm.util :as util :refer [def1]]
+            [bllm.wgsl :as wgsl]))
 
 ;; TODO hardcoded shortest path to triangle
 (def1 vbo nil)
@@ -13,6 +15,67 @@
 (def1 shader-mod nil)
 (def1 render-pipe nil)
 
+(wgsl/def-vertex-attr in-position 0 :vec4
+  "Unpacked vertex position in model space.")
+
+(wgsl/def-interpolant io-position :builtin :vec4
+  "Unpacked vertex position in clip space. Required vertex output.")
+
+(wgsl/def-draw-target out-color 0 :vec4
+  "Generic pixel color.")
+
+(meta/defenum bind-group
+  grp-frame
+  grp-pass
+  grp-effect
+  grp-model)
+
+(wgsl/defstruct Hello
+  [world :vec2]
+  [value :u32]
+  [hello :f32]
+  [slide :vec3]
+  )
+
+(wgsl/defuniform ub-frame
+  ""
+  grp-frame 0
+  [hello      Hello]
+  [time       :vec4]
+  [sin-time   :vec4]
+  [delta-time :vec4]
+  [number     :u32])
+
+(wgsl/defstorage s-mydata grp-pass 1 :vec4 :r
+  "Test Storage")
+
+(wgsl/deftexture tex-albedo grp-effect 0 :vec4)
+
+(wgsl/defsampler sam-default grp-frame 1)
+
+(wgsl/defgroup g-frame
+  ""
+  ub-frame)
+
+(wgsl/deflayout l-demo
+  ""
+  )
+
+(wgsl/defvertex vs-demo
+  "Vertex shader in ClojureScript!"
+  [position]
+  (set! io-position position))
+
+(wgsl/defpixel ps-demo
+  "Fragment/pixel shader in ClojureScript!"
+  []
+  (set! out-color (vec4 0.42 0.69 0 1)))
+
+(wgsl/defrender demo-render
+  "Assemble the pipeline here, only by composition."
+  vs-demo ps-demo)
+
+;; TODO this can be generated from the above nodes, when they are implemented.
 (def pass-desc
   ;; TODO this will need work, FF still uses the older API, chrome doesn't see an adapter
   #js {:colorAttachments
@@ -28,19 +91,19 @@
                                         0  1 0 1
                                         1 -1 0 1])]
     (set! vbo (gpu/buffer "Demo VBO" (.-byteLength vertices)
-                          (bit-or js/GPUBufferUsage.VERTEX js/GPUBufferUsage.COPY_DST)
+                          (bit-or gpu/usage-vertex gpu/usage-copy-dst)
                           false))
     (.writeBuffer gpu/device.queue vbo 0 vertices))
 
   (set! ubo (gpu/buffer "Demo UBO" 4096
-                        (bit-or js/GPUBufferUsage.UNIFORM js/GPUBufferUsage.COPY_DST)
+                        (bit-or gpu/usage-uniform gpu/usage-copy-dst)
                         false))
 
   (set! bind-grp-layout (gpu/bind-group-layout "Demo Bind Group Layout"
                                                (util/array
                                                 #js {:binding 0
-                                                     :visibility js/GPUShaderStage.FRAGMENT
-                                                     :buffer #js {}})))
+                                                     :visibility gpu/stage-fragment
+                                                     :buffer nil})))
 
   (set! bind-grp (gpu/bind-group "Demo Bind Group"
                                  bind-grp-layout
@@ -71,23 +134,23 @@ fn demo_frag() -> @location(0) vec4<f32> {
          js/undefined nil))
 
   ;; TODO entirely generated from shader macros
+  (gpu/vertex shader-mod "demo_vert"
+              #js [#js {:attributes #js [#js {:shaderLocation in-position.bind
+                                              :offset 0
+                                              :format "float32x4"}]
+                        :arrayStride 16
+                        :stepMode "vertex"}])
+
+  (gpu/fragment shader-mod "demo_frag"
+                #js [#js {:format gpu/preferred-format}])
+
   (set! render-pipe
         (gpu/render-pipeline
          "Demo Render Pipeline"
          pipe-layout
-         #js {:module shader-mod
-              :entryPoint "demo_vert"
-              :buffers #js [#js {:attributes #js [#js {:shaderLocation 0
-                                                       :offset 0
-                                                       :format "float32x4"}]
-                                 :arrayStride 16
-                                 :stepMode "vertex"}]}
          #js {:topology "triangle-list"}
-         js/undefined
-         js/undefined
-         #js {:module shader-mod
-              :entryPoint "demo_frag"
-              :targets #js [#js {:format gpu/preferred-format}]}
+         js/undefined ; depth/stencil
+         js/undefined ; multisample
          ))
   )
 
@@ -103,13 +166,13 @@ fn demo_frag() -> @location(0) vec4<f32> {
   (set! (.-view (aget pass-desc.colorAttachments 0))
         (.. (aget disp/viewports 0) -target -ctx getCurrentTexture createView))
 
-  (aset util/scratch 0 (js/Math.sin (* 0.0025 time/unscaled-now)))
+  (aset util/scratch 0 (js/Math.sin (* 0.00025 time/unscaled-now)))
   (.writeBuffer gpu/device.queue ubo 0 util/scratch 0 4)
 
   ;; TODO render graph, separate passes
   (let [enc (gpu/command-encoder "test")
         cmd (.beginRenderPass enc pass-desc)
-        vp (.. (aget disp/viewports 0) -canvas)]
+        vp  (.. (aget disp/viewports 0) -canvas)]
     (.setPipeline cmd render-pipe)
     (.setVertexBuffer cmd 0 vbo)
     (.setBindGroup cmd 0 bind-grp)

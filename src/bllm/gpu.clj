@@ -2,37 +2,58 @@
   "Meta WebGPU. Or how I stopped worrying and learned to love the browser."
   (:require [clojure.string      :as str]
             [clojure.tools.macro :as macro]
-            [bllm.util           :as util]))
+            [bllm.util           :as util :refer [defm]]))
 
 ;; TODO use the individual param type tags!
 
-(defmacro ^:private defgpu
-  "Generates a constructor function for the specified WebGPU object type."
-  {:arglists '([ctor-name docstring? attrs-map? & param-specs])}
-  [ctor-name & args]
-  (let [[sym xs] (macro/name-with-attributes ctor-name args)
-        ident    (util/kebab->pascal sym)
-        attrs    (meta sym)
+(defn- descriptor-symbol [s]
+  (symbol (str s "-desc")))
+
+(defn- emit-descriptor [create? ctor-name param-specs desc-sym desc-tag-fn
+                        & extra-fields]
+  (let [ident    (util/kebab->pascal ctor-name)
+        attrs    (meta ctor-name)
+        fields   (concat extra-fields param-specs)
         create   (symbol (str (:create attrs "create") ident))
-        params   (conj xs '[label :str ""])
-        arg-syms (mapv first params)
-        desc-tag (symbol "js" (str "GPU" ident "Descriptor"))
-        desc-sym (symbol      (str sym "-desc"))]
+        arg-syms (mapv first (remove #(:static (meta %)) fields))
+        desc-tag (symbol "js" (desc-tag-fn ident))]
     (util/wrap-do
      ;; Emit a reusable descriptor `js/Object`. Only used by the next fn.
      `(def ~(with-meta desc-sym {:tag desc-tag :private true})
         (cljs.core/js-obj
          ~@(flatten
-            (for [[param tag & [default]] params]
+            (for [[param tag & [default]] fields]
               ;; TODO help JS runtime, use default value of type tag
               [(str param) (if (some? default) default 'js/undefined)]))))
      ;; Emit a function to fill the descriptor and create a `gpu/Object`.
-     `(defn ~sym ~arg-syms
+     `(defn ~ctor-name ~arg-syms
         ~@(for [arg arg-syms]
             `(set! (. ~desc-sym ~(symbol (str \- arg))) ~arg))
-        (let [^js/GPUObjectBase obj# (. ~'device ~create ~desc-sym)]
-          (set! (.-label obj#) ~'label) ; TODO compat only! dev browser doesn't take label from descriptor
-          obj#)))))
+        ~(if-not create?
+           'js/undefined
+           `(let [^js/GPUObjectBase obj# (. ~'device ~create ~desc-sym)]
+              (set! (.-label obj#) ~'label) ; TODO compat only! dev browser doesn't take label from descriptor
+              obj#))))))
+
+(defm ^:private defgpu
+  "Generates a constructor function for the specified WebGPU object type."
+  [ctor-name & param-specs]
+  (emit-descriptor true ctor-name param-specs
+                   (descriptor-symbol ctor-name)
+                   #(str "GPU" % "Descriptor")
+                   '[label :str ""]))
+
+(defm ^:private defstage
+  "Generates a setup function for the specified WebGPU shader stage."
+  [ctor-name pipeline-desc tag & param-specs]
+  (let [desc-sym (descriptor-symbol ctor-name)]
+    (util/wrap-do
+     (emit-descriptor false ctor-name param-specs desc-sym
+                      (constantly (name tag))
+                      '[module ::shader-module]
+                      '[entryPoint :string])
+     ;; Connect the stage descriptor to the pipeline descriptor. Once.
+     `(set! (. ~pipeline-desc ~(symbol (str \- ctor-name))) ~desc-sym))))
 
 (comment
   (clojure.pprint/pprint

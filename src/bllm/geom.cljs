@@ -27,14 +27,14 @@
 ;; - can reuse buffer for longer before it needs realloc, can copy existing data
 
 ;; generic storage bindings here
-
+#_
 (defkernel sphere
   {:workgroup [32 32]}
   [global-invocation-id :builtin] :uvec3
   (var index global-invocation-id.x
        vVel  (-> (aget particlesA.particles index) .-pos)
        ))
-
+#_
 (defkernel box
   []
   )

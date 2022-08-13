@@ -37,7 +37,7 @@
                                                 (for [n (range (count init))]
                                                   `(aset ~'v ~n ~(nth init n))))
                                             ~'v))))))))))]
-  (defscratch ; Just to make this trivial to extend in the future.
+  (defscratch ; Just to make this last bit trivial to extend in the future.
     [unit-x+ :f32 [ 1  0  0 1] "Unit X+ axis."]
     [unit-y+ :f32 [ 0  1  0 1] "Unit Y+ axis."]
     [unit-z+ :f32 [ 0  0  1 1] "Unit Z+ axis."]
