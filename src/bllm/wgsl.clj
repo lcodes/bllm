@@ -10,13 +10,21 @@
   The goal is to write GPU definitions transparently alongside the CPU ones.
   Leverage figwheel to hot-reload shader code the same way it does with JS."
   (:refer-clojure :exclude [defstruct])
-  (:require [clojure.string :as str]
+  (:require [cljs.analyzer :as ana]
+            [clojure.string :as str]
             [bllm.meta :as meta]
             [bllm.util :as util :refer [defm]]))
 
 
 ;;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- gpu-id [ns sym]
+  (assert (string? ns))
+  (assert (string? sym))
+  (let [h (bit-xor (hash ns) (hash sym))] ; Poor man's deterministic ID.
+    (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
+    h))
 
 (def ^:private gpu-ns
   "Converts a `Namespace` into a WGSL-compatible identifier. Memoized."
@@ -53,32 +61,56 @@
   [sym fields]
   ;; TODO ctor -> ab? offset? -> dataview
   ;; - attach array of fields as ctor prop, pass ctor to node ctor
+
   (with-meta `(util/array ~@(map emit-field fields))
-    (meta fields)))
+    (assoc (meta fields) :deps [1 2 3])))
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
-  [wgsl? ns sym kind ctor & args]
-  (let [name (and wgsl? (gpu-name sym))
+  [wgsl? enum-ns sym kind ctor deps & args]
+  (let [uuid (gpu-id (str *ns*) (name sym))
         hash (gpu-hash sym args) ; TODO diff hash for reload vs identity?
-        sym  (cond-> (vary-meta sym assoc ::kind kind ::hash hash)
+        name (and wgsl? (gpu-name sym))
+        sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
                wgsl? (vary-meta assoc ::name name))]
     `(bllm.wgsl/reg
       (def ~sym
         (~ctor
-         ~@(when wgsl? [name])
+         ~uuid
          ~hash
-         ~@(map (partial util/keyword->enum ns) args))))))
+         ~@(when wgsl? [name])
+         ~@(cond (nil?   deps) nil
+                 (empty? deps) ['bllm.util/empty-array]
+                 :else         [`(cljs.core/array ~@deps)])
+         ~@(map (partial util/keyword->enum enum-ns) args))))))
 
 (defn- node-kind [sym]
   (or (:kind (meta sym))
       (keyword (str/replace-first (name sym) #"^def-?" ""))))
 
+(def ^:private has-deps?
+  "WGSL node kinds tracking their dependencies to other WGSL nodes."
+  '#{uniform
+     struct
+     function
+     depth-stencil
+     blend
+     vertex
+     pixel
+     kernel
+     group
+     layout
+     render
+     compute})
+
 (defm ^:private defnode
   "Defines a kind of WGSL node definition. Used to define nodes of its kind."
   [sym [node & args] & body]
   (let [kind  (node-kind sym)
-        init  (gensym "init")
+        attrs (meta sym)
+        deps? (:deps attrs)
+        ginit (gensym "init")
+        gmeta (gensym "meta")
         props (take-while #(not= '& %) args)] ; Until the variadic arg marker.
     ;; Write code, that writes code, that writes code... oh hi Lisp!
     `(defm ~sym
@@ -88,9 +120,7 @@
              doc#     (last args#)
              doc?#    (string? doc#)
              [~@args] (if doc?# (butlast args#) args#)
-             ~node    (if-not doc?#
-                        ~node
-                        (vary-meta ~node assoc :doc doc#))
+             ~node    (if-not doc?# ~node (vary-meta ~node assoc :doc doc#))
              ;; Copy named node properties to the meta-data of its defined var.
              ~@(when (not-empty props)
                  `[~node (vary-meta ~node assoc
@@ -98,24 +128,28 @@
                                        (for [p props]
                                          [(keyword util/ns-wgsl (name p)) p])))])
              ;; Execute the compile-time logic specific to this node type.
-             ~init (do ~@body)
-             ~node (if-let [m# (meta ~init)]
-                     (vary-meta ~node merge m#)
-                     ~node)]
+             ~ginit (do ~@body)
+             ~gmeta (meta ~ginit)
+             ~node (if-not ~gmeta ~node (vary-meta ~node merge ~gmeta))]
          ;; Finally, generate the node on the ClojureScript side of things.
-         (emit-node ~(:wgsl (meta sym) true)
-                    util/ns-wgsl ~node ~kind
+         (emit-node ~(:wgsl attrs true) util/ns-wgsl ~node ~kind
                     '~(util/keyword->wgsl kind)
+                    ~(when (has-deps? (util/sym kind))
+                       (if deps? ginit `(:deps ~gmeta [])))
                     ~@props
-                    ~@(when (not-empty body)
-                        [init]))))))
+                    ~@(when (and (not-empty body) (not deps?))
+                        [ginit]))))))
 
 (defn- emit-obj [sym emit? keys vals]
   `(cljs.core/js-obj
     "kind" ~(symbol util/ns-wgsl (util/kebab->pascal sym))
+    "uuid" ~'id
     "hash" ~'hash
-    ~@(when emit? '["wgsl" js/undefined
-                    "name" name])
+    ~@(when (has-deps? sym)
+        '["deps" deps])
+    ~@(when emit?
+        '["name" name
+          "wgsl" js/undefined])
     ~@(interleave keys vals)))
 
 (defm ^:private defwgsl
@@ -128,7 +162,10 @@
                    (list emit-wgsl node)
                    (cons (first emit-wgsl)
                          (cons node (next emit-wgsl))))))]
-    `(defn ~sym [~@(when emit '[name]) ~'hash ~@params]
+    `(defn ~sym [~'id ~'hash
+                 ~@(when emit '[name])
+                 ~@(when (has-deps? sym) '[deps])
+                 ~@params]
        (let [~node ~(emit-obj sym emit (map str params) params)]
          ~(when emit
             ;; A node is just a property bag attached to a list of WGSL emitters.
@@ -214,20 +251,25 @@
   [state]
   (let [props (state-props state)
         names (map first props)]
-    `(defn ~state [~'hash ~@names]
+    `(defn ~state [~'id ~'hash
+                   ~@(when (has-deps? state) '[deps])
+                   ~@names]
        ~(emit-obj state nil
                   (map util/kebab->camel names)
                   (map configure-state props)))))
 
 (defm ^:private defstate
   "Simpler `defnode` used to declare render states. Constructed with kw-args."
-  [sym]
+  [sym & deps]
   (let [kind  (node-kind sym)
-        props (state-props (util/sym kind))
+        k-sym (util/sym kind)
+        props (state-props k-sym)
         names (map first props)]
     `(defm ~sym [~'name & {:keys [~@names]}]
        (emit-node false util/ns-gpu ~'name ~kind
                   '~(util/keyword->wgsl kind)
+                  ~(when (has-deps? k-sym)
+                     `(map (comp ::uuid #(ana/resolve-var ~'&env %)) [~@deps]))
                   ~@names))))
 
 (defstate defprimitive
@@ -236,7 +278,8 @@
 (defstate defstencil-face)
 
 (defstate defdepth-stencil
-  "Describes how a pipeline will affect a render pass's depth-stencil attachment.")
+  "Describes how a pipeline will affect a render pass's depth-stencil attachment."
+  stencil-front stencil-back)
 
 (defstate defmultisample
   "Describes how a pipeline interacts with a render pass's multisampled attachments.")
@@ -244,7 +287,8 @@
 (defstate defblend-comp
   "Describes how the color or alpha components of a fragment are blended.")
 
-(defstate defblend)
+(defstate defblend
+  color alpha)
 
 
 ;;; Render I/O - Vertex attributes, interpolants, fragment draw targets
@@ -300,7 +344,7 @@
 
 (defnode defvar ; TODO like def, but emits WGSL
   "Pipeline-overridable constants."
-  {:kind 'override}
+  {:kind :override}
   [sym & args]
   ;; ID is hash of sym
   ;; no default means required constant
@@ -309,7 +353,7 @@
   )
 
 (defnode defun ; TODO like defn, but emits WGSL
-  {:kind 'function}
+  {:kind :function}
   [sym & args]
   )
 
@@ -349,29 +393,37 @@
 ;;; Shader Pipelines - Runtime Execution State
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn resolve-bindings [env args allowed-kinds]
+  (let [vars (map #(ana/resolve-var env %) args)]
+    (doseq [v vars]
+      (when-not (allowed-kinds (::kind v))
+        (throw (ex-info "Unexpected binding kind" {:expected allowed-kinds
+                                                   :found (::kind v) :in v}))))
+    (map ::uuid vars)))
+
 (defnode defgroup
-  {:wgsl false}
-  [sym & args]
+  {:wgsl false :deps true}
+  [sym & binds]
   ;; resolve all resource, make sure groups match
   ;;
   ;; descriptor for pipeline layouts
   ;; constructor for resource bindings
-  )
+  (resolve-bindings &env binds #{:uniform :storage :texture :sampler}))
 
 (defnode deflayout
-  {:wgsl false}
-  [sym & args]
+  {:wgsl false :deps true}
+  [sym & groups]
   ;; resolve all groups, make sure order match
   ;;
   ;; gpu/defres for layout object
-  )
+  (resolve-bindings &env groups #{:group}))
 
 (defnode defrender
   {:wgsl false}
   [sym & args]
-  )
+  "TODO")
 
 (defnode defcompute
   {:wgsl false}
   [sym & args]
-  )
+  "TODO")

@@ -14,11 +14,11 @@
   "Class name for a CSS animation to entertain the user during initialization."
   "rotate")
 
-(def1 ^js/HTMLElement main
+(def1 ^:private ^js/HTMLElement main
   "Application container element. Defined in index.html."
   (js/document.querySelector "main"))
 
-(def1 ^js/HTMLCanvasElement canvas
+(def1 ^:private ^js/HTMLCanvasElement canvas
   "Interactive viewport; user input and gfx output."
   (js/document.createElement "canvas"))
 

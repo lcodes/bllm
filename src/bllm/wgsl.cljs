@@ -2,8 +2,7 @@
   "One shadergraph to rule the WebGPU Shading Language.
 
   Specification found at https://www.w3.org/TR/WGSL/"
-  (:require-macros [clojure.tools.macro :refer [macrolet]]
-                   [bllm.wgsl :refer [defgpu defwgsl]])
+  (:require-macros [bllm.wgsl :refer [defgpu defwgsl]])
   (:require [bllm.meta :refer [defenum]]
             [bllm.util :refer [defconst def1 ===]]))
 
@@ -131,12 +130,12 @@
   (str "@location(" (io-bind node.bind) ") "
        node.name " : " (gpu-prim-type node.type)))
 
-(defn- emit-group-binding [node address-space type]
+(defn- emit-bind [node address-space type]
   (str "@group(" node.group ") @binding(" node.bind ") var"
        address-space " " node.name " : " type ";"))
 
 (defn- emit-var [node address-space type-fn]
-  (emit-group-binding node address-space (type-fn node)))
+  (emit-bind node address-space (type-fn node)))
 
 (defn- emit-struct [node]
   (str "struct " node.name " {\n"
@@ -147,7 +146,7 @@
   "TODO")
 
 (defn- emit-entry [node]
-  )
+  "TODO")
 
 
 ;;; Stateless Node Definitions
@@ -168,7 +167,7 @@
   (emit-var "" gpu-full-texture-type))
 
 (defwgsl sampler [group bind]
-  (emit-group-binding "" "sampler"))
+  (emit-bind "" "sampler"))
 
 (defwgsl struct [info] emit-struct)
 
@@ -178,7 +177,7 @@
 (defwgsl const    [type init] emit-const)
 (defwgsl override [type init] emit-override)
 
-(defwgsl function [params ret body] emit-fn)
+(defwgsl function [params ret wgsl] emit-fn)
 
 
 ;;; Stateful Shader Nodes
@@ -194,21 +193,21 @@
 (defgpu blend-comp)
 (defgpu blend)
 
-(defwgsl vertex [body] emit-entry)
-(defwgsl pixel  [body] emit-entry)
-(defwgsl kernel [body] emit-entry)
+(defwgsl vertex [wgsl] emit-entry)
+(defwgsl pixel  [wgsl] emit-entry)
+(defwgsl kernel [wgsl] emit-entry)
 
 (defwgsl group  [])
 (defwgsl layout [])
 
-(defwgsl render  [])
-(defwgsl compute [])
+(defwgsl render  [pipeline])
+(defwgsl compute [pipeline])
 
 
 ;;; Shader System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def1 node-defs (js/Map.))
+(def1 ^:private node-defs (js/Map.))
 
 (comment (js/console.log node-defs))
 
