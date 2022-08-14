@@ -9,8 +9,9 @@
 (defn- descriptor-symbol [s]
   (symbol (str s "-desc")))
 
-(defn- emit-descriptor [create? ctor-name param-specs desc-sym desc-tag-fn
-                        & extra-fields]
+(defn- emit-descriptor
+  "Generates a reusable descriptor and a function to populate it."
+  [create? ctor-name param-specs desc-sym desc-tag-fn & extra-fields]
   (let [ident    (util/kebab->pascal ctor-name)
         attrs    (meta ctor-name)
         fields   (concat extra-fields param-specs)

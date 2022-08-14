@@ -3,7 +3,7 @@
 
   Specification found at https://www.w3.org/TR/WGSL/"
   (:require-macros [clojure.tools.macro :refer [macrolet]]
-                   [bllm.wgsl :refer [defreg]])
+                   [bllm.wgsl :refer [defgpu defwgsl]])
   (:require [bllm.meta :refer [defenum]]
             [bllm.util :refer [defconst def1 ===]]))
 
@@ -14,15 +14,50 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; https://github.com/gpuweb/gpuweb/issues/566
 
+(defenum node-kind
+  "Supported shader graph node kinds. "
+  ;; Render State Definitions
+  Primitive
+  StencilFace
+  DepthStencil
+  Multisample
+  BlendComp
+  Blend
+  ;; Render I/O Definitions
+  VertexAttr
+  DrawTarget
+  Interpolant
+  ;; Resources Definitions
+  Uniform
+  Storage
+  Texture
+  Sampler
+  ;; Code Definitions
+  Struct
+  Enum
+  Flag
+  Const
+  Override
+  Function
+  ;; Stage Definitions (stateful nodes -> preconfigured pipeline stages)
+  Vertex
+  Pixel
+  Kernel
+  ;; Pipeline Definitions (no WGSL -> high-level, stateful "glue" nodes)
+  Group
+  Layout
+  Render
+  Compute)
+
 ;; TODO encode base type, row/col counts directly in enumerated value bits
 (defenum gpu-prim-type
   "Predefined types available in WGSL."
   {:repr :string}
-  bool   :bool
   u32    :u32
   i32    :i32
-  f32    :f32
+  f32    :f32 ; max index of texture base type
   f16    :f16 ; requires "enable f16;"
+  bool   :bool
   vec2   :vec2<f32>
   vec3   :vec3<f32>
   vec4   :vec4<f32>
@@ -58,6 +93,19 @@
   r  "<storage,read>"
   rw "<storage,read_write>")
 
+(defenum gpu-texture-type
+  {:repr :string}
+  tex-1d         :texture_1d
+  tex-2d         :texture_2d
+  tex-2d-array   :texture_2d_array
+  tex-3d         :texture_3d
+  tex-cube       :texture_cube
+  tex-cube-array :texture_cube_array)
+;; TODO multisampled, external, storage, depth textures
+
+(defn gpu-full-texture-type [node]
+  (str (gpu-texture-type node.tex) \< (gpu-prim-type node.type) \>))
+
 (defconst builtin
   "Special value for built-in bindings."
   -1)
@@ -67,35 +115,98 @@
     "builtin"
     slot))
 
+(defn- emit-enum [node]
+  "TODO")
 
-;;; Shader Graph
+(defn- emit-const [node]
+  (str "const " node.name " : " node.type " = " node.init ";"))
+
+(defn- emit-override [node]
+  ;; TODO will need node.id to be in [0..65535]
+  (str "@id(" node.id ") override " node.name " : " node.type
+       (when node.init " = ")
+       node.init ";"))
+
+(defn- emit-io [node]
+  (str "@location(" (io-bind node.bind) ") "
+       node.name " : " (gpu-prim-type node.type)))
+
+(defn- emit-group-binding [node address-space type]
+  (str "@group(" node.group ") @binding(" node.bind ") var"
+       address-space " " node.name " : " type ";"))
+
+(defn- emit-var [node address-space type-fn]
+  (emit-group-binding node address-space (type-fn node)))
+
+(defn- emit-struct [node]
+  (str "struct " node.name " {\n"
+       ;; TODO fields
+       "}"))
+
+(defn- emit-fn [node]
+  "TODO")
+
+(defn- emit-entry [node]
+  )
+
+
+;;; Stateless Node Definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defenum node-kind
-  VertexAttr
-  DrawTarget
-  Interpolant
-  Struct
-  Uniform
-  Storage
-  Texture
-  Sampler
-  Group
-  Layout
-  Enum
-  Flag
-  Const
-  Override
-  Function
-  Vertex
-  Pixel
-  Kernel
-  Primitive
-  DepthStencil
-  Multisample
-  Blend
-  Render
-  Compute)
+(defwgsl vertex-attr [bind type] emit-io)
+(defwgsl draw-target [bind type] emit-io)
+(defwgsl interpolant [bind type] emit-io)
+
+(defwgsl uniform [group bind info]
+  emit-struct ; TODO support primitive uniforms?
+  (emit-var "<uniform>" gpu-type))
+
+(defwgsl storage [group bind type access]
+  (emit-var (storage-address-space access) gpu-type))
+
+(defwgsl texture [group bind tex type]
+  (emit-var "" gpu-full-texture-type))
+
+(defwgsl sampler [group bind]
+  (emit-group-binding "" "sampler"))
+
+(defwgsl struct [info] emit-struct)
+
+(defwgsl enum [keys vals] emit-enum)
+(defwgsl flag [keys vals] emit-enum)
+
+(defwgsl const    [type init] emit-const)
+(defwgsl override [type init] emit-override)
+
+(defwgsl function [params ret body] emit-fn)
+
+
+;;; Stateful Shader Nodes
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(comment (primitive 1090 nil nil nil nil nil)
+         (depth-stencil "hi" 1245 25))
+
+(defgpu primitive)
+(defgpu stencil-face)
+(defgpu depth-stencil)
+(defgpu multisample)
+(defgpu blend-comp)
+(defgpu blend)
+
+(defwgsl vertex [body] emit-entry)
+(defwgsl pixel  [body] emit-entry)
+(defwgsl kernel [body] emit-entry)
+
+(defwgsl group  [])
+(defwgsl layout [])
+
+(defwgsl render  [])
+(defwgsl compute [])
+
+
+;;; Shader System
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def1 node-defs (js/Map.))
 
@@ -108,104 +219,6 @@
   ;;(.set node-defs node.name node)
   (js/console.log node)
   node)
-
-
-;;; Node Definitions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn- emit-io [node]
-  (str "@location(" (io-bind node.bind) ") "
-       node.name " : " (gpu-prim-type node.type)))
-
-(defn- emit-var [node address-space]
-  (str "@group(" node.group ") @binding(" node.bind ") var"
-       address-space " " node.name " : " (gpu-type node)))
-
-(defn- emit-struct [node]
-  (str "struct " node.name " {\n"
-       ;; TODO fields
-       "}"))
-
-(defreg vertex-attr [bind type] emit-io)
-(defreg draw-target [bind type] emit-io)
-(defreg interpolant [bind type] emit-io)
-
-(defreg struct [info] emit-struct)
-
-(defreg uniform [group bind info]
-  emit-struct
-  (emit-var "<uniform>"))
-
-(defreg storage [group bind type access]
-  (emit-var (storage-address-space access)))
-
-(defreg texture [group bind type])
-
-(defreg sampler [group bind])
-
-(defn group [& x])
-(defn layout [& x])
-
-(defn enum [& x]
-  )
-
-(defn flag [& x]
-  )
-
-(defn const [name hash type init]
-  #js {:kind Const
-       :name name
-       :hash hash
-       :type type
-       :init init
-       :wgsl (str "const " type " " name " = " init ";")})
-
-(defn override
-  ([name hash type]
-   (override name hash type nil))
-  ([name hash type init?]
-   #js {:kind Override
-        :name name
-        :hash hash
-        :type type
-        :init init?
-        :wgsl (str "@id(" hash ") override " type " " name
-                   (when init? " = ")
-                   init? ";")}))
-
-(defn function [& x]
-  )
-
-(defn vertex [& x])
-(defn pixel [& x])
-(defn kernel [& x])
-
-
-;;; Render Pipeline States
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; TODO adapt emit-descriptor from gpu to create GPUPrimitiveState and others
-(defn primitive
-  [topology ])
-
-(defn depth-stencil
-  [])
-
-(defn multisample
-  [])
-
-(defn blend
-  [color alpha])
-
-(defn render
-  [& x])
-
-(defn compute
-  [& x])
-
-
-;;; Shader System
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn compile []
   ;; - entry point

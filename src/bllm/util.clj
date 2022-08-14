@@ -50,6 +50,27 @@
   (let [a (dec alignment)]
     (bit-and (+ a size) (bit-not a))))
 
+(defn sym [^clojure.lang.Keyword k]
+  (.sym k))
+
+(defn keyword->enum
+  "Converts keywords to the matching constants."
+  [default-ns x]
+  (if-not (keyword? x)
+    x
+    (-> (namespace x)
+        (or default-ns)
+        (name)
+        (symbol (name x)))))
+
+(def ns-gpu  "bllm.gpu")
+(def ns-wgsl "bllm.wgsl")
+
+(def keyword->gpu  (partial keyword->enum ns-gpu))
+(def keyword->wgsl (partial keyword->enum ns-wgsl))
+
+(comment (keyword->enum "hello" ::foo-bar))
+
 (defn to-js
   "Emits the given data form as a JavaScript literal."
   [form]
@@ -125,9 +146,7 @@
   [sym init]
   (wrap-do
    (when (dev?) ; Constants can't be redefined, but they can be undefined.
-     `(cljs.core/ns-unmap
-       (quote ~(.getName *ns*))
-       (quote ~sym)))
+     `(cljs.core/ns-unmap '~(.getName *ns*) '~sym))
    `(def ~(vary-meta sym assoc :const true) ; All this for a meta property.
       ~init)))
 

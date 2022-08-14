@@ -68,9 +68,10 @@
             f-size  (if prim? (prim-size  tag) (::size  info))
             offset  (util/align f-align offset)]
         (recur (next fields)
-               (max align f-align)
-               (+  offset f-size)
+               (long (max align f-align))
+               (long (+  offset f-size))
                (conj output {:name   sym
+                             :meta   info
                              :type   tag
                              :size   f-size
                              :align  f-align
@@ -97,7 +98,7 @@
                      v (if (vector? x) (second x) value)
                      s (if (vector? x) (first  x) x)]
                  (recur (next elems)
-                        (inc v)
+                        (long (inc v))
                         (conj xs [s v])))))]
     `(do
        ;; Emit each enumerated element as a separate constant definition.

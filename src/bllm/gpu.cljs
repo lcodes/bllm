@@ -13,7 +13,7 @@
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
   (:require-macros [bllm.gpu :refer [defgpu defstage]])
   (:require [bllm.meta :refer [defenum defflag]]
-            [bllm.util :as util :refer [def1]]))
+            [bllm.util :as util :refer [def1 defconst]]))
 
 (set! *warn-on-infer* true)
 
@@ -21,11 +21,11 @@
 ;;; Initialization - Adapter, Features & Device
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def1 ^js/GPUAdapter adapter
+(def1 ^:private ^js/GPUAdapter adapter
   "WebGPU implementation instance. Mostly used to create the `device`."
   js/undefined)
 
-(def1 ^js/GPUDevice device
+(def1 ^:private ^js/GPUDevice device
   "WebGPU logical device. Used to create all GPU objects and submit commands."
   js/undefined)
 
@@ -94,6 +94,81 @@
 ;;; Object Constructors
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defenum topology
+  {:repr :string}
+  point-list
+  line-list
+  line-strip
+  triangle-list
+  triangle-strip)
+
+(defenum front-face
+  {:repr :string}
+  ccw
+  cw)
+
+(defenum cull-mode
+  {:repr :string :prefix cull-}
+  cull-none
+  front
+  back)
+
+(defflag color-write
+  "Values for the write-mask of a color target state."
+  RED
+  GREEN
+  BLUE
+  ALPHA)
+
+(defconst ALL (bit-or RED GREEN BLUE ALPHA))
+
+(defenum blend-factor
+  {:repr :string}
+  zero         :zero
+  one          :one
+  srcRGB       :src
+  srcA         :src-alpha
+  dstRGB       :dst
+  dstA         :dst-alpha
+  one-srcRGB   :one-minus-src
+  one-srcA     :one-minus-src-alpha
+  one-dstRGB   :one-minus-dst
+  one-dstA     :one-minus-dst-alpha
+  srcA-s       :src-alpha-saturated
+  constant     :constant
+  one-constant :one-minus-constant)
+
+(defenum blend-op
+  {:repr :string}
+  op+    :add
+  op-    :subtract
+  op-rev :reverse-subtract
+  op-min :min
+  op-max :max)
+
+(defenum compare-fn
+  "Predefined functions available to the depth/stencil tests and samplers."
+  {:repr :string}
+  fn-0  :never
+  fn-<  :less
+  fn-=  :equal
+  fn-<= :less-equal
+  fn->  :greater
+  fn-!= :not-equal
+  fn->= :greater-equal
+  fn-1  :always)
+
+(defenum stencil-op
+  {:repr :string}
+  op-1        :keep
+  op-0        :zero
+  op-rep      :replace
+  op-inv      :invert
+  op-inc      :increment-clamp
+  op-dec      :decrement-clamp
+  op-inc-wrap :increment-wrap
+  op-dec-wrap :decrement-wrap)
+
 (defenum index-format
   "Memory layout of an index element."
   {:repr :string :prefix index-}
@@ -133,6 +208,11 @@
   sint32x2
   sint32x3
   sint32x4)
+
+(defenum vertex-step-mode
+  {:repr :string :prefix step-}
+  step-vertex
+  step-instance)
 
 (defenum texture-format
   "Memory layout of a texture pixel."
@@ -319,10 +399,6 @@
   ^:static
   [compute ::programmable-stage])
 
-(defstage compute
-  "Setups the compute stage before calling `compute-pipeline`."
-  compute-pipeline-desc GPUProgrammableStage)
-
 (defgpu render-pipeline
   "Low-level pipeline creation, called from `bllm.wgsl`.
 
@@ -335,6 +411,10 @@
   [multisample  ::multisample-state   util/empty-obj]
   ^:static
   [fragment     ::fragment-state])
+
+(defstage compute
+  "Setups the compute stage before calling `compute-pipeline`."
+  compute-pipeline-desc GPUProgrammableStage)
 
 (defstage vertex
   "Setups the vertex stage before calling `render-pipeline`."
@@ -438,6 +518,16 @@ fn frag() -> @location(0) vec4<f32> {
 
 (defn marker [label]
   (.insertDebugMarker device label))
+
+
+;;; Queues
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn submit [cmd-bufs]
+  (.submit (.-queue device) cmd-bufs))
+
+(defn submit1 [cmd-buf]
+  (submit (util/array cmd-buf)))
 
 
 ;;; Queries

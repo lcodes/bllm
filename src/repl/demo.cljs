@@ -15,13 +15,26 @@
 (def1 shader-mod nil)
 (def1 render-pipe nil)
 
-(wgsl/def-vertex-attr in-position 0 :vec4
+(wgsl/defprimitive raster-default
+  "")
+
+(wgsl/defblend-comp blend-default)
+(wgsl/defblend-comp blend-something
+  :operation  :op-rev
+  :src-factor :one-dstRGB ; Short idents seemed nice at the time,
+  :dst-factor :one-dstA)  ; not sure I like them being different from the spec
+
+(wgsl/defblend blend-test
+  :color blend-something
+  :alpha blend-default)
+
+(wgsl/defvertex-attr in-position 0 :vec4
   "Unpacked vertex position in model space.")
 
-(wgsl/def-interpolant io-position :builtin :vec4
+(wgsl/definterpolant io-position :builtin :vec4
   "Unpacked vertex position in clip space. Required vertex output.")
 
-(wgsl/def-draw-target out-color 0 :vec4
+(wgsl/defdraw-target out-color 0 :vec4
   "Generic pixel color.")
 
 (meta/defenum bind-group
@@ -47,11 +60,13 @@
   [number     :u32])
 
 (wgsl/defstorage s-mydata grp-pass 1 :vec4 :r
-  "Test Storage")
+  "Test storage")
 
-(wgsl/deftexture tex-albedo grp-effect 0 :vec4)
+(wgsl/deftexture tex-albedo grp-effect 0 :tex-2d :f32
+  "Test texture")
 
-(wgsl/defsampler sam-default grp-frame 1)
+(wgsl/defsampler sam-default grp-frame 1
+  "Test sampler")
 
 (wgsl/defgroup g-frame
   ""
@@ -59,7 +74,7 @@
 
 (wgsl/deflayout l-demo
   ""
-  )
+  g-frame)
 
 (wgsl/defvertex vs-demo
   "Vertex shader in ClojureScript!"
@@ -148,7 +163,7 @@ fn demo_frag() -> @location(0) vec4<f32> {
         (gpu/render-pipeline
          "Demo Render Pipeline"
          pipe-layout
-         #js {:topology "triangle-list"}
+         raster-default
          js/undefined ; depth/stencil
          js/undefined ; multisample
          ))
