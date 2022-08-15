@@ -3,7 +3,8 @@
 
   Specification found at https://www.w3.org/TR/WGSL/"
   (:require-macros [bllm.wgsl :refer [defgpu defwgsl]])
-  (:require [bllm.meta :refer [defenum]]
+  (:require [bllm.gpu]
+            [bllm.meta :refer [defenum]]
             [bllm.util :refer [defconst def1 ===]]))
 
 (set! *warn-on-infer* true)
@@ -197,8 +198,8 @@
 (defwgsl pixel  [wgsl] emit-entry)
 (defwgsl kernel [wgsl] emit-entry)
 
-(defwgsl group  [])
-(defwgsl layout [])
+(defwgsl group  [bind])
+(defwgsl layout [groups])
 
 (defwgsl render  [pipeline])
 (defwgsl compute [pipeline])

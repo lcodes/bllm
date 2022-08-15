@@ -15,14 +15,20 @@
 (def1 shader-mod nil)
 (def1 render-pipe nil)
 
-(wgsl/defprimitive raster-default
-  "")
+(wgsl/defprimitive raster-default)
+
+(wgsl/defstencil-face default-face)
+
+(wgsl/defdepth-stencil default-ds
+  :format :depth24plus-stencil8)
+
+(wgsl/defmultisample default-msaa)
 
 (wgsl/defblend-comp blend-default)
 (wgsl/defblend-comp blend-something
-  :operation  :op-rev
-  :src-factor :one-dstRGB ; Short idents seemed nice at the time,
-  :dst-factor :one-dstA)  ; not sure I like them being different from the spec
+  :operation  :op-reverse-subtract
+  :src-factor :one-minus-src
+  :dst-factor :one-minus-dst-alpha)
 
 (wgsl/defblend blend-test
   :color blend-something
@@ -47,8 +53,7 @@
   [world :vec2]
   [value :u32]
   [hello :f32]
-  [slide :vec3]
-  )
+  [slide :vec3])
 
 (wgsl/defuniform ub-frame
   ""
@@ -68,13 +73,11 @@
 (wgsl/defsampler sam-default grp-frame 1
   "Test sampler")
 
-(wgsl/defgroup g-frame
-  ""
-  ub-frame)
+(wgsl/defgroup g-frame ub-frame)
 
-(wgsl/deflayout l-demo
-  ""
-  g-frame)
+(wgsl/defgroup g-effect tex-albedo)
+
+(wgsl/deflayout l-demo g-frame g-effect)
 
 (wgsl/defvertex vs-demo
   "Vertex shader in ClojureScript!"

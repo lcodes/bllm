@@ -108,8 +108,8 @@
   cw)
 
 (defenum cull-mode
-  {:repr :string :prefix cull-}
-  cull-none
+  {:repr :string}
+  none
   front
   back)
 
@@ -123,51 +123,51 @@
 (defconst ALL (bit-or RED GREEN BLUE ALPHA))
 
 (defenum blend-factor
-  {:repr :string}
-  zero         :zero
-  one          :one
-  srcRGB       :src
-  srcA         :src-alpha
-  dstRGB       :dst
-  dstA         :dst-alpha
-  one-srcRGB   :one-minus-src
-  one-srcA     :one-minus-src-alpha
-  one-dstRGB   :one-minus-dst
-  one-dstA     :one-minus-dst-alpha
-  srcA-s       :src-alpha-saturated
-  constant     :constant
-  one-constant :one-minus-constant)
+  {:repr :string :prefix blend-}
+  zero
+  one
+  src
+  src-alpha
+  dst
+  dst-alpha
+  one-minus-src
+  one-minus-src-alpha
+  one-minus-dst
+  one-minus-dst-alpha
+  src-alpha-saturated
+  constant
+  one-minus-constant)
 
 (defenum blend-op
-  {:repr :string}
-  op+    :add
-  op-    :subtract
-  op-rev :reverse-subtract
-  op-min :min
-  op-max :max)
+  {:repr :string :prefix op-}
+  op-add
+  op-subtract
+  op-reverse-subtract
+  op-min
+  op-max)
 
 (defenum compare-fn
   "Predefined functions available to the depth/stencil tests and samplers."
-  {:repr :string}
-  fn-0  :never
-  fn-<  :less
-  fn-=  :equal
-  fn-<= :less-equal
-  fn->  :greater
-  fn-!= :not-equal
-  fn->= :greater-equal
-  fn-1  :always)
+  {:repr :string :prefix fn-}
+  fn-never
+  fn-less
+  fn-equal
+  fn-less-equal
+  fn-greater
+  fn-not-equal
+  fn-greater-equal
+  fn-always)
 
 (defenum stencil-op
-  {:repr :string}
-  op-1        :keep
-  op-0        :zero
-  op-rep      :replace
-  op-inv      :invert
-  op-inc      :increment-clamp
-  op-dec      :decrement-clamp
-  op-inc-wrap :increment-wrap
-  op-dec-wrap :decrement-wrap)
+  {:repr :string :prefix op-}
+  op-keep
+  op-zero
+  op-replace
+  op-invert
+  op-increment-clamp
+  op-decrement-clamp
+  op-increment-wrap
+  op-decrement-wrap)
 
 (defenum index-format
   "Memory layout of an index element."

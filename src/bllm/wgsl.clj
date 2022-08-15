@@ -58,12 +58,15 @@
     (:offset field)))
 
 (defn- emit-struct
-  [sym fields]
+  [env sym fields]
   ;; TODO ctor -> ab? offset? -> dataview
   ;; - attach array of fields as ctor prop, pass ctor to node ctor
 
   (with-meta `(util/array ~@(map emit-field fields))
-    (assoc (meta fields) :deps [1 2 3])))
+    (->> (map :type fields)
+         (filter symbol?)
+         (map (comp ::uuid (partial ana/resolve-var env)))
+         (assoc (meta fields) :deps))))
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
@@ -103,12 +106,30 @@
      render
      compute})
 
+(defn- resolve-enum [env sym]
+  (let [v (:const-expr (ana/resolve-var env sym))]
+    (when-not (and (= :const  (:op  v))
+                   (= 'number (:tag v)))
+      (throw (ex-info "Expected number constant." {:sym sym :expr v})))
+    (:val v)))
+
+(defn- invalid-bind-prop [key val]
+  (throw (ex-info "Expected number or symbol." {:key key :in val})))
+
+(def ^:private bind-group-props '#{group bind})
+
+(defn- resolve-bind-group [prop]
+  (if-not (bind-group-props prop)
+    prop
+    `(cond (symbol? ~prop) (resolve-enum ~'&env ~prop)
+           (or (number? ~prop) (keyword? ~prop)) ~prop
+           :else (invalid-bind-prop ~(name prop) ~prop))))
+
 (defm ^:private defnode
   "Defines a kind of WGSL node definition. Used to define nodes of its kind."
   [sym [node & args] & body]
   (let [kind  (node-kind sym)
         attrs (meta sym)
-        deps? (:deps attrs)
         ginit (gensym "init")
         gmeta (gensym "meta")
         props (take-while #(not= '& %) args)] ; Until the variadic arg marker.
@@ -126,7 +147,8 @@
                  `[~node (vary-meta ~node assoc
                                     ~@(util/flatten1
                                        (for [p props]
-                                         [(keyword util/ns-wgsl (name p)) p])))])
+                                         [(keyword util/ns-wgsl (name p))
+                                          (resolve-bind-group p)])))])
              ;; Execute the compile-time logic specific to this node type.
              ~ginit (do ~@body)
              ~gmeta (meta ~ginit)
@@ -135,10 +157,12 @@
          (emit-node ~(:wgsl attrs true) util/ns-wgsl ~node ~kind
                     '~(util/keyword->wgsl kind)
                     ~(when (has-deps? (util/sym kind))
-                       (if deps? ginit `(:deps ~gmeta [])))
+                       `(:deps ~gmeta []))
                     ~@props
-                    ~@(when (and (not-empty body) (not deps?))
-                        [ginit]))))))
+                    ~@(when (not-empty body)
+                        [(if (:wrap attrs)
+                           `(:value ~ginit)
+                           ginit)]))))))
 
 (defn- emit-obj [sym emit? keys vals]
   `(cljs.core/js-obj
@@ -182,16 +206,16 @@
   (-> '{primitive     [topology               [:triangle-list :topology]
                        strip-index-format     [nil            :index-format]
                        front-face             [:ccw           :front-face]
-                       cull-mode              [:cull-none     :cull-mode]
+                       cull-mode              [:none          :cull-mode]
                        unclipped-depth        false]
-        stencil-face  [compare                [:fn-1 :compare-fn]
-                       fail-op                [:op-1 :stencil-op]
-                       depth-op               [:op-1 :stencil-op]
-                       depth-fail-op          [:op-1 :stencil-op]
-                       pass-op                [:op-1 :stencil-op]]
-        depth-stencil [format                 [:required :texture-format]
+        stencil-face  [compare                [:fn-always :compare-fn]
+                       fail-op                [:op-keep   :stencil-op]
+                       depth-op               [:op-keep   :stencil-op]
+                       depth-fail-op          [:op-keep   :stencil-op]
+                       pass-op                [:op-keep   :stencil-op]]
+        depth-stencil [format                 [:required  :texture-format]
                        depth-write?           false
-                       depth-compare          [:fn-1 :compare-fn]
+                       depth-compare          [:fn-always :compare-fn]
                        stencil-front          bllm.util/empty-obj
                        stencil-back           bllm.util/empty-obj
                        stencil-read-mask      0xffffffff
@@ -202,9 +226,9 @@
         multisample   [count                  1
                        mask                   0xffffffff
                        alpha-to-coverage?     false]
-        blend-comp    [operation              [:op+  :blend-op]
-                       src-factor             [:one  :blend-factor]
-                       dst-factor             [:zero :blend-factor]]
+        blend-comp    [operation              [:op-add :blend-op]
+                       src-factor             [:one    :blend-factor]
+                       dst-factor             [:zero   :blend-factor]]
         blend         [color                  :required
                        alpha                  :required]}
       (update-vals (partial partition 2))))
@@ -269,7 +293,8 @@
        (emit-node false util/ns-gpu ~'name ~kind
                   '~(util/keyword->wgsl kind)
                   ~(when (has-deps? k-sym)
-                     `(map (comp ::uuid #(ana/resolve-var ~'&env %)) [~@deps]))
+                     `(->> (filter some? [~@deps])
+                           (map (comp ::uuid #(ana/resolve-var ~'&env %)))))
                   ~@names))))
 
 (defstate defprimitive
@@ -310,11 +335,11 @@
 (defnode defstruct
   "Aggregate type definition."
   [sym & fields]
-  (emit-struct sym (meta/parse-struct &env fields)))
+  (emit-struct &env sym (meta/parse-struct &env fields)))
 
 (defnode defuniform
   [sym group bind & fields]
-  (emit-struct sym (meta/parse-struct &env fields)))
+  (emit-struct &env sym (meta/parse-struct &env fields)))
 
 (defnode defstorage
   [sym group bind type access])
@@ -357,14 +382,17 @@
   [sym & args]
   )
 
+(defn- emit-entry [env ]
+  )
+
 (defnode defvertex
   "Defines a vertex shader entry point."
-  [sym & args]
+  [sym & body]
   ;; inputs -> vertex -> interpolants
   ;;
   ;; runtime needs to collect all inputs and unpack them from the generated entry
   ;; then collect all outputs and thread them into packed interpolants
-  "")
+  (emit-entry &env ))
 
 (defnode defpixel
   "Defines a fragment shader entry point."
@@ -373,7 +401,7 @@
   ;;
   ;; runtime needs to collect all interpolants and unpack them
   ;; then collect all outputs and thread them into packed render targets
-  "")
+  (emit-entry &env))
 
 (defnode defkernel
   "Defines a compute shader entry point.
@@ -387,36 +415,64 @@
   ;; inputs -> compute -> outputs
   ;;
   ;; thread counts
-  "")
+  (emit-entry &env ))
 
 
 ;;; Shader Pipelines - Runtime Execution State
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn resolve-bindings [env args allowed-kinds]
+(defn- resolve-bindings [env args sort-key allowed-kinds augment]
+  (when (empty? args)
+   (throw (ex-info "Expecting binding list" {})))
   (let [vars (map #(ana/resolve-var env %) args)]
     (doseq [v vars]
       (when-not (allowed-kinds (::kind v))
-        (throw (ex-info "Unexpected binding kind" {:expected allowed-kinds
-                                                   :found (::kind v) :in v}))))
-    (map ::uuid vars)))
+        (throw (ex-info "Unexpected binding kind"
+                        {:expected allowed-kinds :found (::kind v) :in v}))))
+    (let [sorted-vars (sort-by sort-key vars)]
+      (augment sorted-vars (map ::uuid vars)))))
 
+(defn- validate-group [vars deps]
+  (when-not (apply = (map ::group vars))
+    (throw (ex-info "Group bindings must match" {:in vars})))
+  (when-not (distinct? (map ::bind vars))
+    (throw (ex-info "Group bindings cannot overlap" {:in vars})))
+  (let [g (::group (first vars))]
+    (with-meta {:value g} {:deps deps ::group g})))
+
+(defn- validate-layout [vars deps]
+  (when-not (distinct? (map ::group vars))
+    (throw (ex-info "Layout groups cannot overlap" {:in vars})))
+  (let [grps (loop [vars vars
+                    bind 0
+                    grps ()]
+               (if-not vars
+                 `(cljs.core/array ~@(reverse grps))
+                 (let [v (first vars)
+                       g (if (= bind (::group v))
+                           (:name v)
+                           nil)]
+                   (recur (if g (next vars) vars)
+                          (inc bind)
+                          (cons g  grps)))))]
+    (with-meta grps {:deps deps})))
+
+;; descriptor for pipeline layouts
+;; constructor for resource bindings
 (defnode defgroup
-  {:wgsl false :deps true}
+  {:wgsl false :wrap true}
   [sym & binds]
-  ;; resolve all resource, make sure groups match
-  ;;
-  ;; descriptor for pipeline layouts
-  ;; constructor for resource bindings
-  (resolve-bindings &env binds #{:uniform :storage :texture :sampler}))
+  (resolve-bindings &env binds ::bind
+                    #{:uniform :storage :texture :sampler}
+                    validate-group))
 
+;; gpu/defres for layout object
 (defnode deflayout
-  {:wgsl false :deps true}
+  {:wgsl false}
   [sym & groups]
-  ;; resolve all groups, make sure order match
-  ;;
-  ;; gpu/defres for layout object
-  (resolve-bindings &env groups #{:group}))
+  (resolve-bindings &env groups ::group
+                    #{:group}
+                    validate-layout))
 
 (defnode defrender
   {:wgsl false}
