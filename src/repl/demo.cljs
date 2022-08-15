@@ -81,17 +81,15 @@
 
 (wgsl/defvertex vs-demo
   "Vertex shader in ClojureScript!"
-  [position]
-  (set! io-position position))
+  (set! io-position in-position))
 
 (wgsl/defpixel ps-demo
   "Fragment/pixel shader in ClojureScript!"
-  []
   (set! out-color (vec4 0.42 0.69 0 1)))
 
 (wgsl/defrender demo-render
   "Assemble the pipeline here, only by composition."
-  vs-demo ps-demo)
+  vs-demo ps-demo l-demo)
 
 ;; TODO this can be generated from the above nodes, when they are implemented.
 (def pass-desc

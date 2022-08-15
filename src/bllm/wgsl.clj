@@ -50,10 +50,13 @@
          (gpu-name 'in-position)
          (gpu-hash 1 "hi" :key 'sym))
 
+(defn- resolve-vars [env vars]
+  (map (partial ana/resolve-var env) vars))
+
 (defn- emit-field
   [field]
   (list 'cljs.core/array
-    (util/kebab->camel (:name field))
+    (util/kebab->camel  (:name field))
     (util/keyword->wgsl (:type field))
     (:offset field)))
 
@@ -78,9 +81,7 @@
                wgsl? (vary-meta assoc ::name name))]
     `(bllm.wgsl/reg
       (def ~sym
-        (~ctor
-         ~uuid
-         ~hash
+        (~ctor ~uuid ~hash
          ~@(when wgsl? [name])
          ~@(cond (nil?   deps) nil
                  (empty? deps) ['bllm.util/empty-array]
@@ -418,21 +419,21 @@
   (emit-entry &env ))
 
 
-;;; Shader Pipelines - Runtime Execution State
+;;; Resource Groups
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- resolve-bindings [env args sort-key allowed-kinds augment]
+(defn- resolve-bindings [env args sort-key allowed-kinds emit-fn]
   (when (empty? args)
    (throw (ex-info "Expecting binding list" {})))
-  (let [vars (map #(ana/resolve-var env %) args)]
+  (let [vars (resolve-vars env args)]
     (doseq [v vars]
       (when-not (allowed-kinds (::kind v))
         (throw (ex-info "Unexpected binding kind"
                         {:expected allowed-kinds :found (::kind v) :in v}))))
     (let [sorted-vars (sort-by sort-key vars)]
-      (augment sorted-vars (map ::uuid vars)))))
+      (emit-fn sorted-vars (map ::uuid vars)))))
 
-(defn- validate-group [vars deps]
+(defn- emit-group [vars deps]
   (when-not (apply = (map ::group vars))
     (throw (ex-info "Group bindings must match" {:in vars})))
   (when-not (distinct? (map ::bind vars))
@@ -440,7 +441,7 @@
   (let [g (::group (first vars))]
     (with-meta {:value g} {:deps deps ::group g})))
 
-(defn- validate-layout [vars deps]
+(defn- emit-layout [vars deps]
   (when-not (distinct? (map ::group vars))
     (throw (ex-info "Layout groups cannot overlap" {:in vars})))
   (let [grps (loop [vars vars
@@ -449,22 +450,20 @@
                (if-not vars
                  `(cljs.core/array ~@(reverse grps))
                  (let [v (first vars)
-                       g (if (= bind (::group v))
-                           (:name v)
-                           nil)]
+                       g (when (= bind (::group v))
+                           (:name v))]
                    (recur (if g (next vars) vars)
                           (inc bind)
-                          (cons g  grps)))))]
+                          (cons g grps)))))]
     (with-meta grps {:deps deps})))
 
-;; descriptor for pipeline layouts
 ;; constructor for resource bindings
 (defnode defgroup
   {:wgsl false :wrap true}
   [sym & binds]
   (resolve-bindings &env binds ::bind
                     #{:uniform :storage :texture :sampler}
-                    validate-group))
+                    emit-group))
 
 ;; gpu/defres for layout object
 (defnode deflayout
@@ -472,14 +471,46 @@
   [sym & groups]
   (resolve-bindings &env groups ::group
                     #{:group}
-                    validate-layout))
+                    emit-layout))
+
+
+;;; Shader Pipelines - Runtime Execution State
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- required-first [g]
+  (if (= 1 (count g))
+    (first g)
+    (throw (ex-info "Missing required element" {}))))
+
+(defn- optional-first [g]
+  (case (count g)
+    0 nil
+    1 (first g)
+    (throw (ex-info "Too many elements of the same kind" {:elem g}))))
+
+(defn- emit-pipeline [& elems]
+  ;; TODO where does `gpu/defres` fit in this -> implement that subsystem first
+  (with-meta `(cljs.core/array ~@(map :name elems))
+    {:deps (filter some? (map ::uuid elems))}))
 
 (defnode defrender
   {:wgsl false}
-  [sym & args]
-  "TODO")
+  [sym & layout|stages|states]
+  (let [{:keys [layout vertex fragment primitive depth-stencil multisample depth]}
+        (group-by ::kind (resolve-vars &env layout|stages|states))]
+    (emit-pipeline (required-first layout)
+                   (required-first vertex)
+                   (optional-first fragment)
+                   (optional-first primitive)
+                   (optional-first depth-stencil)
+                   (optional-first multisample)
+                   (optional-first depth))))
+;; TODO fragment blends, match number of outputs in fragment stage (or 0, or 1 repeated blend)
 
 (defnode defcompute
   {:wgsl false}
-  [sym & args]
-  "TODO")
+  [sym & layout|stage]
+  (let [{:keys [layout compute]}
+        (group-by ::kind (resolve-vars &env layout|stage))]
+    (emit-pipeline (required-first layout)
+                   (required-first compute))))
