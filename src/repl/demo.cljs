@@ -95,8 +95,8 @@
 (def pass-desc
   ;; TODO this will need work, FF still uses the older API, chrome doesn't see an adapter
   #js {:colorAttachments
-       #js [#js {;:clearValue (js/Float32Array. 0.92 0 0.69 1)
-                 :loadValue #js {:r 0.69 :g 0 :b 0.42 :a 1}
+       #js [#js {:clearValue #js [0.92 0 0.69 1]
+                 :loadOp "clear"
                  :storeOp "store"}]})
 
 (defn scene
@@ -147,7 +147,7 @@ fn demo_frag() -> @location(0) vec4<f32> {
   return vec4<f32>(0.42f, abs(sinTime)/2.0f, 0.69f, 1f);
 }
 "
-         js/undefined nil))
+         js/undefined js/undefined))
 
   ;; TODO entirely generated from shader macros
   (gpu/vertex shader-mod "demo_vert"
@@ -193,5 +193,5 @@ fn demo_frag() -> @location(0) vec4<f32> {
     (.setVertexBuffer cmd 0 vbo)
     (.setBindGroup cmd 0 bind-grp)
     (.draw cmd 3)
-    (.endPass cmd)
+    (.end cmd)
     (.submit gpu/device.queue (util/array (.finish enc)))))

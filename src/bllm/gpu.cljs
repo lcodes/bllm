@@ -551,13 +551,6 @@ fn frag() -> @location(0) vec4<f32> {
   preferred-format)
 
 (defn html-setup-target [^js/GPUCanvasContext ctx ^js/GPUCanvasConfiguration cfg]
-  (util/compat-old true
-    {:ff 105}
-    (let [^js/HTMLCanvasElement c cfg.canvas
-          sz (.-size cfg)]
-      (aset sz 0 (.-width  c))
-      (aset sz 1 (.-height c))))
-  ;; TODO canvas disappear in FF until toggling its styles in the inspector :/
   (.configure ctx cfg))
 
 (defn ^js/GPUCanvasConfiguration html-render-target
@@ -566,7 +559,7 @@ fn frag() -> @location(0) vec4<f32> {
     ;; TODO usage, viewFormats, colorSpace, alphaMode
     #js {:device device
          :format (detect-preferred-format ctx)
-         :size   #js [1 1 1] ; TODO deprecated, still required by FF 105
+         :alphaMode "opaque"
          :canvas canvas
          :ctx    ctx}))
 
