@@ -63,7 +63,7 @@
             ;;          doc? (butlast))
             prim?   (keyword? tag)
             info    (when (symbol? tag) ; User-defined types
-                      (:meta (ana/resolve-var env tag)))
+                      (:meta (ana/resolve-existing-var env tag)))
             f-align (if prim? (prim-align tag) (::align info))
             f-size  (if prim? (prim-size  tag) (::size  info))
             offset  (util/align f-align offset)]

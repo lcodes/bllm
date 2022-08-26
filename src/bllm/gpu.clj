@@ -66,3 +66,12 @@
        [usage ::buffer-usage]
        [mappedAtCreation :bool false])))
   )
+
+(defm defres
+  "Defines a GPU resource. Its value will be set when a device is acquired."
+  [sym init]
+  `(do (bllm.util/def1 ~sym js/undefined)
+       (bllm.gpu/register
+        ~(hash sym) ~(hash init)
+        (fn [] ~sym) ; NOTE only required in development
+        (fn [] (set! ~sym ~init)))))

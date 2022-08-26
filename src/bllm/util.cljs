@@ -1,5 +1,5 @@
 (ns bllm.util
-  (:refer-clojure :exclude [array])
+  (:refer-clojure :exclude [array bytes])
   (:require-macros [clojure.tools.macro :refer [macrolet]]
                    [bllm.util :as util]))
 
@@ -9,11 +9,22 @@
 ;;; Reusable memory
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def spaces
+  "Preallocated indentation spaces."
+  (let [c 16
+        n 2
+        xs (js/Array. c)]
+    (dotimes [i c]
+      (aset xs i (.repeat \space (* n i)))) ; We are the parens who say.. *NI!
+    xs))
+
 ;; A highly overkill method to achieve reusable typed memory in the browser.
 (macrolet [(elem-dim [init] ; Initializer dimension.
              (if (vector? init) (count init) init))
            (elem-size [ty dim] ; Size of a single typed array.
-             (* dim (case ty :f32 4)))
+             (* dim (case ty
+                      :u8  1
+                      :f32 4)))
            (calc-size [total-sz [_ ty init]] ; Accumulator for the buffer size.
              (+ total-sz (elem-size ty (elem-dim init))))
            (defscratch [& vars] ; Compiler for our little one-use DSL.
@@ -27,7 +38,9 @@
                         (let [[sym ty init doc] (first vars)
                               dim  (elem-dim init)
                               size (elem-size ty dim)
-                              ctor (case ty :f32 'js/Float32Array)]
+                              ctor (case ty
+                                     :u8  'js/Uint8Array
+                                     :f32 'js/Float32Array)]
                           (recur (next vars)
                                  (+ ofs ^long size)
                                  (conj defs ; Generate one def per DSL entry.
@@ -44,6 +57,7 @@
     [unit-x- :f32 [-1  0  0 1] "Unit X- axis."]
     [unit-y- :f32 [ 0 -1  0 1] "Unit Y- axis."]
     [unit-z- :f32 [ 0  0 -1 1] "Unit Z- axis."]
+    [bytes   :u8  64 "Short-lived byte-array."]
     [scratch :f32 16 "Short-lived matrix-sized float array."]
     [temp-a  :f32 16 "Register-like matrix-sized float array."]
     [temp-b  :f32 16 "Register-like matrix-sized float array."]))
@@ -71,6 +85,20 @@
 
 (def empty-array (array))
 (def empty-obj   #js {})
+
+(def temp-array #js [])
+(def temp-map (js/Map.))
+(def temp-set (js/Set.))
+
+(defn clear-array [^js/Array a]
+  (.splice a 0 (.-length a)))
+
+(defn color [r g b a]
+  (aset bytes 0 r)
+  (aset bytes 1 g)
+  (aset bytes 2 b)
+  (aset bytes 3 a)
+  bytes)
 
 
 ;;; Micro Logger

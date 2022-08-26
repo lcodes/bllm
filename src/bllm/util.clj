@@ -26,14 +26,31 @@
 
 (defn wrap-do [& forms] `(do ~@forms))
 
+(def ^:private special-chars
+  {\! "_NOT_"
+   \$ "_NTH_"
+   \% "_VAR_"
+   \& "_AND_"
+   \| "_OR_"
+   \- "_SUB_"
+   \+ "_PLUS_"
+   \* "_TIMES_"
+   \= "_EQ_"
+   \< "_LT_"
+   \> "_GT_"
+   \? "_Q_"})
+
 (defn- kebab-capitalize [s re]
-  (str/replace (name s) re
-               (fn [^String m]
-                 (->> (.length m)
-                      (dec)
-                      (.charAt m)
-                      (Character/toUpperCase)
-                      (str)))))
+  (-> (name s)
+      (str/replace re
+                   (fn [^String m]
+                     (->> (.length m)
+                          (dec)
+                          (.charAt m)
+                          (Character/toUpperCase)
+                          (str))))
+      (str/replace "->" "_2_")
+      (str/escape special-chars)))
 
 (defn kebab->camel [s]
   (kebab-capitalize s #"-\w"))
@@ -42,6 +59,7 @@
   (kebab-capitalize s #"^\w|-\w"))
 
 (comment (kebab->camel  :test-hello-world)
+         (kebab->camel  :foo->bar)
          (kebab->pascal :test-hello-world))
 
 (def flatten1 (partial apply concat))
@@ -64,6 +82,7 @@
         (symbol (name x)))))
 
 (def ns-gpu  "bllm.gpu")
+(def ns-lib  "bllm.base")
 (def ns-wgsl "bllm.wgsl")
 
 (def keyword->gpu  (partial keyword->enum ns-gpu))
@@ -97,6 +116,12 @@
          (to-js #{1 2 3})
          (to-js {:a "hello" :b 123})
          (to-js {:a [1 2 3]}))
+
+(def spaces
+  "Preallocated indentation spaces."
+  (mapv #(.repeat " " (* 2 %)) (range 16)))
+
+(comment (spaces 2))
 
 
 ;;; Conditional Compilation -> Matching the different build profiles.
@@ -150,12 +175,19 @@
    `(def ~(vary-meta sym assoc :const true) ; All this for a meta property.
       ~init)))
 
-(defm def1 ; Gonna be honest, this font makes it look like `defl`. Font why?!
+(defm def1
   "Better, shorter `defonce`. Accepts a doc-string and attributes map."
   [sym init]
   (if (dev?)
     `(defonce ~sym ~init)
     `(def ~sym ~init))) ; Advanced compilation doesn't fully remove `defonce`.
+
+(defmacro dump-env
+  "Development helper to inspect ClojureScript's macro `&env`."
+  []
+  `(js/console.log
+    ~(with-out-str
+      (clojure.pprint/pprint &env))))
 
 
 ;;; DWIM -> Direct access to JavaScript's good parts, or "I know what I'm doing"
@@ -166,9 +198,12 @@
 (defmacro &&   [& xs] (binop " && " ~xs))
 (defmacro ||   [& xs] (binop " || " ~xs))
 (defmacro %    [x y]  `(~'js* "~{} % ~{}"  ~x ~y))
-(defmacro add! [x y]  `(~'js* "~{} += ~{}" ~x ~y))
+(defmacro +=   [x y]  `(~'js* "~{} += ~{}" ~x ~y))
 (defmacro inc! [x]    `(~'js* "~{}++" ~x))
 (defmacro dec! [x]    `(~'js* "~{}--" ~x))
+
+(defmacro str! [s & xs]
+  `(~'js* ~(str "~{} += " (binop* " + " xs)) ~s ~@xs))
 
 (defmacro break    [] '(js* "break"))
 (defmacro continue [] '(js* "continue"))
@@ -229,6 +264,10 @@
        ~(when n `(bllm.util/inc! ~n))
        (~'js* "}")
        js/undefined)))
+
+(defmacro domap
+  [binding & body]
+  `(.forEach ~(last binding) (fn [~(first binding) ~(second binding)] ~@body)))
 
 (defmacro doiter
   "No overhead `doseq` specialized to JavaScript's `Iterator` interface."

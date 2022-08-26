@@ -7,6 +7,7 @@
                               (bllm.util/compat-std   1)
                               (bllm.util/doarray      1)
                               (bllm.util/docoll       1)
+                              (bllm.util/domap        1)
                               (bllm.util/doiter       1)
                               (bllm.util/dorange      1)
                               (bllm.util/do-node-list 1))

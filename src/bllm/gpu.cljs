@@ -29,9 +29,38 @@
   "WebGPU logical device. Used to create all GPU objects and submit commands."
   js/undefined)
 
+(def1 ^:private resources
+  "An array of system resources, in declaration order, to maintain alongside the
+  GPU `device`. This allows for both late initialization and re-initialization
+  in case the device needs to be recreated or the resource declaration modified.
+
+  Prefer the `defres` macro to declare system resources."
+  #js [])
+
 (def1 preferred-format
   "The `texture-format` detected to be most efficient for presented surfaces."
   nil)
+
+(defn- init-resources []
+  )
+
+(defn- try-init-resource [res]
+  (when-not (res.get)
+    (res.set)))
+
+(defn register [id hash get set]
+  (if-let [res (.find resources (fn [res] (= res.id id)))]
+    (when (not= hash res.hash) ; Re-registering with different ctor.
+      (set! res.hash hash)
+      (set! res.set set)
+      ;; TODO try destroy
+      (try-init-resource res))
+    (let [res #js {:id   id
+                   :hash hash
+                   :get  get
+                   :set  set}]
+      (.push resources res)
+      (try-init-resource res))))
 
 (defn- on-uncaptured-error [e]
   ;; TODO handle errors
@@ -45,10 +74,11 @@
 
 (defn- init-device []
   (assert device)
+  ;; NOTE don't return this promise! Would hang init until the device crashes.
+  (.then (.-lost              device) (util/callback on-device-lost))
   ;; TODO browser has better handling for now
   ;;(set!  (.-onuncapturederror device) (util/callback on-uncaptured-error))
-  (.then (.-lost              device) (util/callback on-device-lost))
-  js/undefined)
+  (init-resources))
 
 ;; TODO (.destroy device) not sure there's a case for reuse yet, equivalent to F5
 (defn- set!-device [result]
@@ -472,7 +502,7 @@
   (util/doarray [^js/GPUCompilationMessage x (.-messages info)]
     (js/console.log (util/strip-ansi (.-message x)))))
 
-(defn- dump-errors [^js/GPUShaderModule mod]
+(defn dump-errors [^js/GPUShaderModule mod]
   (-> (.compilationInfo mod) ^js/Promise
       (.then dump-errors*)))
 
@@ -565,3 +595,34 @@ fn frag() -> @location(0) vec4<f32> {
 
 (defn html-destroy-target [^js/GPUCanvasContext ctx]
   (.unconfigure ctx))
+
+
+;;; Generic System Resources
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(comment
+  (defres default-tex
+    (texture-2d label rgba8unorm 1 1 (util/color 0x7f 0x7f 0x7f 0xff)))
+
+  (defres black-tex
+    (texture-2d label rgba8unorm 1 1 (util/color 0x00 0x00 0x00 0xff)))
+
+  (defres white-tex
+    (texture-2d label rgba8unorm 1 1 (util/color 0xff 0xff 0xff 0xff)))
+
+  (defres nearest-clamp
+    (sampler label))
+
+  (defres linear-clamp
+    (sampler label))
+
+  (defres linear-mip-clamp
+    (sampler label))
+
+  (defres nearest-mip-clamp
+    (sampler label))
+
+  (defres linear-repeat
+    (sampler label))
+
+  )

@@ -10,7 +10,8 @@
   The goal is to write GPU definitions transparently alongside the CPU ones.
   Leverage figwheel to hot-reload shader code the same way it does with JS."
   (:refer-clojure :exclude [defstruct])
-  (:require [cljs.analyzer :as ana]
+  (:require [cljs.analyzer  :as ana]
+            [clojure.inspector :refer [inspect]]
             [clojure.string :as str]
             [bllm.meta :as meta]
             [bllm.util :as util :refer [defm]]))
@@ -51,14 +52,14 @@
          (gpu-hash 1 "hi" :key 'sym))
 
 (defn- resolve-vars [env vars]
-  (map (partial ana/resolve-var env) vars))
+  (map (partial ana/resolve-existing-var env) vars))
 
 (defn- emit-field
-  [field]
-  (list 'cljs.core/array
-    (util/kebab->camel  (:name field))
-    (util/keyword->wgsl (:type field))
-    (:offset field)))
+  [{:keys [name type offset]}]
+  (list 'bllm.wgsl/field
+    (util/kebab->camel  name)
+    (util/keyword->wgsl type)
+    offset))
 
 (defn- emit-struct
   [env sym fields]
@@ -79,14 +80,14 @@
         name (and wgsl? (gpu-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
                wgsl? (vary-meta assoc ::name name))]
-    `(bllm.wgsl/reg
-      (def ~sym
-        (~ctor ~uuid ~hash
-         ~@(when wgsl? [name])
-         ~@(cond (nil?   deps) nil
-                 (empty? deps) ['bllm.util/empty-array]
-                 :else         [`(cljs.core/array ~@deps)])
-         ~@(map (partial util/keyword->enum enum-ns) args))))))
+    `(do (def ~sym
+           (~ctor ~uuid ~hash
+            ~@(when wgsl? [name])
+            ~@(cond (nil?   deps) nil
+                    (empty? deps) ['bllm.util/empty-array]
+                    :else         [`(cljs.core/array ~@deps)])
+            ~@(map (partial util/keyword->enum enum-ns) args)))
+         (bllm.wgsl/register ~sym))))
 
 (defn- node-kind [sym]
   (or (:kind (meta sym))
@@ -108,7 +109,7 @@
      compute})
 
 (defn- resolve-enum [env sym]
-  (let [v (:const-expr (ana/resolve-var env sym))]
+  (let [v (:const-expr (ana/resolve-existing-var env sym))]
     (when-not (and (= :const  (:op  v))
                    (= 'number (:tag v)))
       (throw (ex-info "Expected number constant." {:sym sym :expr v})))
@@ -133,7 +134,8 @@
         attrs (meta sym)
         ginit (gensym "init")
         gmeta (gensym "meta")
-        props (take-while #(not= '& %) args)] ; Until the variadic arg marker.
+        props (when (:props attrs true)
+                (take-while #(not= '& %) args))] ; Until the variadic arg marker.
     ;; Write code, that writes code, that writes code... oh hi Lisp!
     `(defm ~sym
        {:args '~args}
@@ -153,7 +155,7 @@
              ;; Execute the compile-time logic specific to this node type.
              ~ginit (do ~@body)
              ~gmeta (meta ~ginit)
-             ~node (if-not ~gmeta ~node (vary-meta ~node merge ~gmeta))]
+             ~node  (if-not ~gmeta ~node (vary-meta ~node merge ~gmeta))]
          ;; Finally, generate the node on the ClojureScript side of things.
          (emit-node ~(:wgsl attrs true) util/ns-wgsl ~node ~kind
                     '~(util/keyword->wgsl kind)
@@ -161,9 +163,10 @@
                        `(:deps ~gmeta []))
                     ~@props
                     ~@(when (not-empty body)
-                        [(if (:wrap attrs)
-                           `(:value ~ginit)
-                           ginit)]))))))
+                        (cond (:wrap attrs) [`(:value ~ginit)]
+                              (:many attrs) (for [n (range (:many attrs))]
+                                              `(nth ~ginit ~n))
+                              :else         [ginit])))))))
 
 (defn- emit-obj [sym emit? keys vals]
   `(cljs.core/js-obj
@@ -295,7 +298,7 @@
                   '~(util/keyword->wgsl kind)
                   ~(when (has-deps? k-sym)
                      `(->> (filter some? [~@deps])
-                           (map (comp ::uuid #(ana/resolve-var ~'&env %)))))
+                           (map (comp ::uuid #(ana/resolve-existing-var ~'&env %)))))
                   ~@names))))
 
 (defstate defprimitive
@@ -352,7 +355,338 @@
   [sym group bind])
 
 
-;;; Shader Code - Constants, Variables, Functions & Entry Points
+;;; WGSL Expanders - Support for infix and macro special forms
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; TODO move to cljs compiler context? allow cljs defs to add more operators at compile time
+(def precedence '{*  5
+                  /  5
+                  %  5
+                  +  6
+                  -  6
+                  << 7
+                  >> 7
+                  <  9
+                  <= 9
+                  >  9
+                  >= 9
+                  == 10
+                  &  11
+                  ;; xor
+                  |  13
+                  && 14
+                  || 15
+                  =  16})
+
+(def ops-env
+  (reduce #(assoc %1 %2 {:op :op-fn :name %2}) {} (keys precedence)))
+
+(defn- base-env []
+  (-> @cljs.env/*compiler* :cljs.analyzer/namespaces
+      (get ns-lib) :defs
+      (merge ops-env)))
+
+(defn- op? [x]
+  (contains? precedence x))
+
+(defn- expand-op [l [op r]]
+  (if (> (precedence (first l))
+         (or (precedence op)
+             (throw (ex-info "Operator expected" {:op op}))))
+    (concat (drop-last l) `((~op ~(last l) ~r)))
+    (list op l r)))
+
+(defn- infix-expand* [expr]
+  (let [l (first expr)
+        exprs (partition 2 (next expr))
+        [[op r]] exprs]
+    (reduce expand-op (list op l r) (rest exprs))))
+
+(defn- infix-expand [form]
+  (if-not (some op? (next form))
+    form
+    (let [c (count form)]
+      (when-not (and (>= c 3) (odd? c))
+        (throw (ex-info "Invalid operator form" {:form form})))
+      (infix-expand* form))))
+
+(comment (infix-expand '(hello world))
+         (infix-expand '(1 (*) 2))
+         (infix-expand '(1 * 2))
+         (infix-expand '(place = 1 * expr + (2 * 3))))
+
+(defn- macro-expand [env expr]
+  (let [expr' (ana/macroexpand-1 env expr)]
+    (if (= expr expr')
+      expr
+      (macro-expand env expr'))))
+
+
+;;; WGSL Analyzer - Interpret a subset of Clojure into shader AST nodes
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defrecord ParseCtx [cljs-env deps])
+
+(declare parse)
+
+(defn- parse-all [ctx env forms]
+  (map (partial parse ctx env) forms))
+
+(defn- parse-dispatch [ctx env f args]
+  f)
+
+(defmulti parse* #'parse-dispatch)
+
+(defmethod parse* :default [ctx env f args]
+  {:op :call
+   :fn (parse ctx env f)
+   :xs (parse-all ctx env args)})
+
+(defmethod parse* 'let* [ctx env _ [bindings & body]]
+  (when-not (even? (count bindings))
+    (throw (ex-info "Invalid bindings form" {:bindings bindings})))
+  (loop [env   env
+         out   ()
+         pairs (partition 2 bindings)]
+    (if-not pairs
+      {:op   :let
+       :bind (vec (reverse out))
+       :body (parse-all ctx env body)}
+      (let [[k v] (first pairs)
+            node {:op :binding
+                  :name k
+                  ::name (util/kebab->camel k)
+                  :init (parse ctx env v)}]
+        (recur (assoc env k node)
+               (conj out node)
+               (next pairs))))))
+
+(defn- resolve-var [ctx sym]
+  (when-let [v (ana/resolve-existing-var (:cljs-env ctx) sym)]
+    (when (::uuid v)
+      (.add ^java.util.HashSet (:deps ctx) v))
+    v)) ; TODO validate
+
+(defn- get-expand [s]
+  (if (re-find #"^[0-9]+$" s)
+    {:op :nth :elem (Integer/parseInt s)}
+    {:op :field :name s ::name (util/kebab->camel s)}))
+
+(defn- sym-expand [sym]
+  (if-not (str/index-of (name sym) \.)
+    sym
+    (let [[s & path] (str/split (name sym) #"\.")]
+      [(symbol s) (map get-expand path)])))
+
+(def sym-expand-memoized (memoize sym-expand))
+
+(comment (sym-expand 'foo)
+         (sym-expand 'foo.bar)
+         (sym-expand 'foo.3.xyz)
+         (sym-expand 'foo.hello-world.bar))
+
+(defn- parse-sym [ctx env ident]
+  (let [exp  (sym-expand-memoized ident)
+        vec? (vector? exp)
+        root (if vec? (first exp) exp)
+        node (or (env root) ; Local binding
+                 (resolve-var ctx root) ; Graph node
+                 (throw (ex-info "Symbol not found" {:ident ident})))]
+    (if-not vec?
+      node
+      (loop [path (second exp)
+             node node]
+        (if-not path
+          node
+          (recur (next path)
+                 (assoc (first path) :in node)))))))
+
+(defn- parse-app [cljs env [f :as form]]
+  (when-not f
+    (throw (ex-info "Function expected" {})))
+  (let [[f & args] (infix-expand (if (or (not (symbol? f))
+                                         (contains? env f))
+                                   form
+                                   (macro-expand env form)))]
+    (if (not= '. f)
+      (parse* cljs env f args)
+      (let [sym (second args)]
+        {:op :field
+         :in (parse cljs env (first args))
+         :name sym
+         ::name (util/kebab->camel sym)}))))
+
+(defn- parse-lit [cljs env form]
+  {:op :lit
+   :value form
+   :tag (cond
+          (double?  form) :f
+          (integer? form) :i
+          :else (throw (ex-info "Unexpected literal type" {:type (type form)
+                                                           :value form})))})
+
+(defn- parse [cljs env form]
+  (cond (symbol? form) (parse-sym cljs env form)
+        (seq?    form) (parse-app cljs env form)
+        :else          (parse-lit cljs env form)))
+
+
+;;; WGSL Emitter - Reduce the AST down to source text
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; TODO generate source maps
+;; TODO advanced optimizations (rename vars, remove dead code, etc)
+
+(defmulti gen* :op)
+
+(defmethod gen* :default [node]
+  (throw (ex-info (pr-str node) {:node node})))
+
+(defn- needs-semicolon? [{:keys [op]}]
+  (not= :let op))
+
+(def ^:dynamic *return*
+  "Bound to `true` when entering `gen*` from `defun`, `false` otherwise."
+  false)
+
+(def ^:dynamic *indent*
+  0)
+
+(defn- indent []
+  (print (util/spaces *indent*)))
+
+(defn- semicolon
+  ([]
+   (println \;))
+  ([node]
+   (when (needs-semicolon? node)
+     (semicolon))))
+
+;; TODO support assignment to vars too (let [x (let ...)])
+;;  -> thread "x = " to inner let, instead of "return "
+(defn- gen-block [stmts]
+  (binding [*return* false] ; Side-effect statements
+    (doseq [node (butlast stmts)]
+      (indent) ; TODO not first augh
+      (gen* node)
+      (semicolon node)))
+  (when-let [node (last stmts)] ; Return statement
+    (let [ret? *return* ; Push `return` to the end of the innermost `let`.
+          let? (= :let (:op node))]
+      (when-not let?
+        (indent)
+        (when ret?
+          (print "return ")))
+      (binding [*return* (and ret? let?)]
+        (gen* node))
+      (semicolon node))))
+
+(defmethod gen* :do [{:keys [body]}]
+  (gen-block body))
+
+(defn- pr-name [node]
+  (print (::name node)))
+
+(defn- pr-name->camel [node]
+  (print (or (::name node) (util/kebab->camel (:name node)))))
+
+(defmethod gen* :local [node]
+  (pr-name node))
+
+(defmethod gen* :wgsl [node]
+  (pr-name node))
+
+(defmethod gen* :binding [node]
+  (pr-name->camel node))
+
+(defmethod gen* :var [node]
+  (pr-name->camel node))
+
+(defmethod gen* :nth [{:keys [elem in]}]
+  (gen* in)
+  (print \[)
+  (print elem)
+  (print \]))
+
+(defmethod gen* :field [{:keys [name in]}]
+  (gen* in)
+  (print \.)
+  (print (util/kebab->camel name)))
+
+(defmethod gen* :lit [{:keys [value tag]}]
+  (print value)
+  (case tag
+    :f (print \f)
+    nil))
+
+(defmethod gen* :let [{:keys [bind body]}]
+  ;; TODO introduce block scope as needed; map lexical scope in CLJS to lifetime in WGSL
+  (doseq [{:keys [name init] :as node} bind]
+    (indent)
+    (let [m (meta name)]
+      (print (cond (:const m) "const"
+                   (:mut   m) "var"
+                   :else      "let")))
+    (print \space)
+    (pr-name node)
+    ;; TODO tag
+    (when init
+      (print " = ")
+      (gen* init))
+    (semicolon))
+  (gen-block body))
+
+(defmethod gen* :call [{:keys [fn xs]}]
+  (case (:op fn)
+    :op-fn ; Built-in WGSL operators, infix syntax.
+    (let [fname (:name fn)]
+      (print \()
+      (case (count xs)
+        0 (throw (ex-info "Expecting arguments" {:fn fn}))
+        1 (do (print fname) ; Unary; (- operand)
+              (gen* (first xs)))
+        2 (do (gen* (first xs)) ; Binary; (operand + operand)
+              (print \space)
+              (print fname)
+              (print \space)
+              (gen* (second xs)))
+        (do (gen* (first xs)) ; Lispy; (* operand operand operand ...)
+            (loop [[x & xs] xs]
+              (print \space)
+              (print fname)
+              (print \space)
+              (gen* x)
+              (some-> xs (recur)))))
+      (print \)))
+
+    (:var :wgsl) ; Named calls, fn can be user defined or built in WGSL.
+    (do (gen* fn)
+        (print \()
+        (doseq [x (butlast xs)]
+          (gen* x)
+          (print ", "))
+        (when-let [x (last xs)]
+          (gen* x))
+        (print \)))
+
+    (throw (ex-info "Unexpected function value" {:func fn}))))
+
+(defn- gen [body]
+  (with-out-str
+    (gen-block body)))
+
+(defn- compile-fn [cljs-env body link-fn]
+  (let [deps (java.util.HashSet.)
+        cljs (->ParseCtx cljs-env deps)
+        env  (base-env) ; TODO remember env between macros expansions? detect changes from macros in bllm.base
+        code (for [expr body]
+               (parse cljs env expr))
+        wgsl (binding [*indent* 1]
+               (gen code))]
+    (link-fn deps code wgsl))) ; TODO code -> sourcemap
+
+
+;;; Shader Code - Declarations of Constants, Variables, Functions & Entry Points
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defnode defenum
@@ -364,45 +698,78 @@
 
 (defnode defconst ; TODO like util/defconst, but emits WGSL
   "Compile-time constants."
-  [sym & args]
-  ;; const name = value;
-  )
+  {:many 2 :props false}
+  [sym init]
+  [nil init]) ;; TODO expand init expr, infer type
 
 (defnode defvar ; TODO like def, but emits WGSL
   "Pipeline-overridable constants."
-  {:kind :override}
-  [sym & args]
+  {:many 2 :kind :override}
+  [sym & [init]]
   ;; ID is hash of sym
   ;; no default means required constant
   ;;
   ;; @id(0) override name : type = default;
-  )
+  [0 1])
 
-(defnode defun ; TODO like defn, but emits WGSL
-  {:kind :function}
-  [sym & args]
-  )
+(defn- argument [id [sym tag]]
+  {:name sym
+   ::name (util/kebab->camel sym)
+   :binding-form? true
+   :op :binding
+   :env {:context :expr}
+   :arg-id id
+   :info {:name sym}
+   :tag tag
+   :local :arg})
 
-(defn- emit-entry [env ]
-  )
+(defn- with-deps [deps x]
+  (with-meta x {:deps (mapv ::uuid deps)}))
+
+(defnode defun
+  {:many 3 :props false :kind :function}
+  [sym args|ret & body]
+  (let [ret  (when-not (vector? args|ret) args|ret)
+        args (->> (if ret (first body) args|ret)
+                  (partition 2) ; ident/type pairs
+                  (map-indexed argument))
+        env  (->> (reduce #(assoc %1 (:name %2) %2) {} args)
+                  (assoc &env :locals))] ; Make args visible to cljs' analyzer
+    (binding [*return* true]
+      (compile-fn env (if ret (next body) body)
+                  (fn [deps code wgsl]
+                    ;; TODO type inference on let bindings -> ret
+                    (with-deps deps [`(cljs.core/array
+                                       ~@(for [arg args]
+                                           `(bllm.wgsl/argument
+                                             ~(::name arg)
+                                             ~(util/keyword->wgsl (:tag arg)))))
+                                     (util/keyword->wgsl (or ret :f32)) ;; TODO default to type inference
+                                     wgsl]))))))
 
 (defnode defvertex
   "Defines a vertex shader entry point."
+  {:many 3}
   [sym & body]
   ;; inputs -> vertex -> interpolants
   ;;
   ;; runtime needs to collect all inputs and unpack them from the generated entry
   ;; then collect all outputs and thread them into packed interpolants
-  (emit-entry &env ))
+  (compile-fn &env body
+              (fn [deps code wgsl]
+                (with-deps deps [nil nil wgsl]))))
 
 (defnode defpixel
   "Defines a fragment shader entry point."
-  [sym & args]
+  {:many 3}
+  [sym & body]
   ;; interpolants -> fragment -> outputs
   ;;
   ;; runtime needs to collect all interpolants and unpack them
   ;; then collect all outputs and thread them into packed render targets
-  (emit-entry &env))
+  (compile-fn &env body
+              (fn [deps code wgsl]
+                (with-deps deps [nil nil wgsl]))))
 
 (defnode defkernel
   "Defines a compute shader entry point.
@@ -412,11 +779,11 @@
   which user-defined parameters can then be accessed through bound resources.
 
   The workgoup size must also be specified. No default value suits all cases."
-  [sym workgroup]
-  ;; inputs -> compute -> outputs
-  ;;
-  ;; thread counts
-  (emit-entry &env ))
+  {:wrap true}
+  [sym workgroup & body]
+  (compile-fn &env body
+              (fn [deps code wgsl]
+                (with-deps deps {:value wgsl}))))
 
 
 ;;; Resource Groups
@@ -496,11 +863,11 @@
 (defnode defrender
   {:wgsl false}
   [sym & layout|stages|states]
-  (let [{:keys [layout vertex fragment primitive depth-stencil multisample depth]}
+  (let [{:keys [layout vertex pixel primitive depth-stencil multisample depth]}
         (group-by ::kind (resolve-vars &env layout|stages|states))]
     (emit-pipeline (required-first layout)
                    (required-first vertex)
-                   (optional-first fragment)
+                   (optional-first pixel)
                    (optional-first primitive)
                    (optional-first depth-stencil)
                    (optional-first multisample)
