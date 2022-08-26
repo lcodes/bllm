@@ -73,5 +73,5 @@
   `(do (bllm.util/def1 ~sym js/undefined)
        (bllm.gpu/register
         ~(hash sym) ~(hash init)
-        (fn [] ~sym) ; NOTE only required in development
-        (fn [] (set! ~sym ~init)))))
+        (fn get [] ~sym) ; NOTE only required in development
+        (fn set [] (set! ~sym ~init)))))

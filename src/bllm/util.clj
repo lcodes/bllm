@@ -266,8 +266,8 @@
        js/undefined)))
 
 (defmacro domap
-  [binding & body]
-  `(.forEach ~(last binding) (fn [~(first binding) ~(second binding)] ~@body)))
+  [[val-name key-name map-expr] & body]
+  `(.forEach ~map-expr (fn ~'domap [~val-name ~key-name] ~@body)))
 
 (defmacro doiter
   "No overhead `doseq` specialized to JavaScript's `Iterator` interface."

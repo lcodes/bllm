@@ -168,8 +168,9 @@
   (str "@" stage "\nfn " node.name "(Input) -> Output {\n" node.wgsl \}))
 
 (defn- emit-kernel [node]
-  (let [wgsl (str "@compute @workgroup_size(")]
-    ;; TODO workgroup
+  (let [wgsl (str "@compute @workgroup_size(" node.x)]
+    (when-let [y node.y] (str! wgsl ", " y))
+    (when-let [z node.z] (str! wgsl ", " z))
     (str! wgsl ")\nfn " node.name \( "INPUTS" ") {\n" node.wgsl \})))
 
 (defn- emit-vertex [node]
@@ -211,7 +212,7 @@
 (defwgsl const    [type init] emit-const)
 (defwgsl override [type init] emit-override)
 
-(defwgsl function [args ret wgsl] emit-fn)
+(defwgsl function [ret args wgsl] emit-fn)
 
 ;; TODO promote arguments to first-class defwgsl.
 ;; - idea is to have defarg and reuse decl across functions
@@ -233,7 +234,7 @@
 (defgpu blend-comp)
 (defgpu blend)
 
-(defwgsl kernel [workgroups wgsl] emit-kernel) ; TODO workgroup components can be ref to override var
+(defwgsl kernel [x y z   io wgsl] emit-kernel) ; TODO workgroup components can be ref to override var
 (defwgsl vertex [buffers io wgsl] emit-vertex)
 (defwgsl pixel  [targets io wgsl] emit-pixel)
 ;; TODO check limits against device, mark shader usable/unusable
@@ -274,6 +275,18 @@
 
 (comment (js/console.log defs)
          (js/console.log deps))
+
+(defn empty-io []
+  nil) ; TODO reusable "null" node?
+
+(defn gen-io [id deps]
+  (or (.get defs id)
+      (let [io #js {:kind GeneratedIO
+                    :uuid id
+                    :deps (js/Array.from deps)
+                    :wgsl "TODO gen-io"}]
+        (.set defs id io)
+        io)))
 
 (defn register
   "Registers a shader graph node definition."

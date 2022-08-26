@@ -138,7 +138,7 @@
                 (take-while #(not= '& %) args))] ; Until the variadic arg marker.
     ;; Write code, that writes code, that writes code... oh hi Lisp!
     `(defm ~sym
-       {:args '~args}
+       {:args '~(:args attrs args)}
        [~node & args#]
        (let [;; Allow the doc-string to be placed at the end, like Emacs-Lisp.
              doc#     (last args#)
@@ -163,10 +163,9 @@
                        `(:deps ~gmeta []))
                     ~@props
                     ~@(when (not-empty body)
-                        (cond (:wrap attrs) [`(:value ~ginit)]
-                              (:many attrs) (for [n (range (:many attrs))]
-                                              `(nth ~ginit ~n))
-                              :else         [ginit])))))))
+                        (if-let [ks (:keys attrs)]
+                          (for [k ks] `(get ~ginit ~k))
+                          [ginit])))))))
 
 (defn- emit-obj [sym emit? keys vals]
   `(cljs.core/js-obj
@@ -185,7 +184,7 @@
   [sym params & wgsl-emitters]
   (let [node (gensym "node")
         emit (when (not-empty wgsl-emitters)
-               (fn [emit-wgsl]
+               (fn emit [emit-wgsl]
                  (if (symbol? emit-wgsl)
                    (list emit-wgsl node)
                    (cons (first emit-wgsl)
@@ -689,28 +688,26 @@
 ;;; Shader Code - Declarations of Constants, Variables, Functions & Entry Points
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- with-deps [deps x]
+  (with-meta x {:deps (mapv ::uuid deps)}))
+
 (defnode defenum
   [sym & args]) ; TODO like meta/defenum, but emits WGSL
 
 (defnode defflag
-  ""
   [sym & args]) ; TODO like meta/defflag, but emits WGSL
 
-(defnode defconst ; TODO like util/defconst, but emits WGSL
+(defnode defconst
   "Compile-time constants."
-  {:many 2 :props false}
+  {:keys [:type :init] :props false}
   [sym init]
-  [nil init]) ;; TODO expand init expr, infer type
+  {:type nil :init init}) ;; TODO expand init expr, infer type
 
-(defnode defvar ; TODO like def, but emits WGSL
+(defnode defvar
   "Pipeline-overridable constants."
-  {:many 2 :kind :override}
+  {:keys [:type :init] :kind :override}
   [sym & [init]]
-  ;; ID is hash of sym
-  ;; no default means required constant
-  ;;
-  ;; @id(0) override name : type = default;
-  [0 1])
+  {:type nil :init init}) ;; TODO same as defconst
 
 (defn- argument [id [sym tag]]
   {:name sym
@@ -723,11 +720,10 @@
    :tag tag
    :local :arg})
 
-(defn- with-deps [deps x]
-  (with-meta x {:deps (mapv ::uuid deps)}))
-
 (defnode defun
-  {:many 3 :props false :kind :function}
+  {:props false :kind :function
+   :keys [:ret :args :wgsl]
+   :args [ret? [params*] & body]}
   [sym args|ret & body]
   (let [ret  (when-not (vector? args|ret) args|ret)
         args (->> (if ret (first body) args|ret)
@@ -735,41 +731,18 @@
                   (map-indexed argument))
         env  (->> (reduce #(assoc %1 (:name %2) %2) {} args)
                   (assoc &env :locals))] ; Make args visible to cljs' analyzer
-    (binding [*return* true]
-      (compile-fn env (if ret (next body) body)
-                  (fn [deps code wgsl]
+    (->> (fn link [deps code wgsl]
                     ;; TODO type inference on let bindings -> ret
-                    (with-deps deps [`(cljs.core/array
-                                       ~@(for [arg args]
-                                           `(bllm.wgsl/argument
-                                             ~(::name arg)
-                                             ~(util/keyword->wgsl (:tag arg)))))
-                                     (util/keyword->wgsl (or ret :f32)) ;; TODO default to type inference
-                                     wgsl]))))))
-
-(defnode defvertex
-  "Defines a vertex shader entry point."
-  {:many 3}
-  [sym & body]
-  ;; inputs -> vertex -> interpolants
-  ;;
-  ;; runtime needs to collect all inputs and unpack them from the generated entry
-  ;; then collect all outputs and thread them into packed interpolants
-  (compile-fn &env body
-              (fn [deps code wgsl]
-                (with-deps deps [nil nil wgsl]))))
-
-(defnode defpixel
-  "Defines a fragment shader entry point."
-  {:many 3}
-  [sym & body]
-  ;; interpolants -> fragment -> outputs
-  ;;
-  ;; runtime needs to collect all interpolants and unpack them
-  ;; then collect all outputs and thread them into packed render targets
-  (compile-fn &env body
-              (fn [deps code wgsl]
-                (with-deps deps [nil nil wgsl]))))
+                    (with-deps deps
+                      {:wgsl wgsl
+                       :ret  (util/keyword->wgsl (or ret :f32)) ;; TODO default to type inference
+                       :args `(cljs.core/array
+                               ~@(for [arg args]
+                                   `(bllm.wgsl/argument
+                                     ~(::name arg)
+                                     ~(util/keyword->wgsl (:tag arg)))))}))
+         (compile-fn env (if ret (next body) body))
+         (binding [*return* true]))))
 
 (defnode defkernel
   "Defines a compute shader entry point.
@@ -779,11 +752,48 @@
   which user-defined parameters can then be accessed through bound resources.
 
   The workgoup size must also be specified. No default value suits all cases."
-  {:wrap true}
-  [sym workgroup & body]
+  {:keys [:x :y :z :io :wgsl] :props false}
+  [sym [x y z] & body]
   (compile-fn &env body
-              (fn [deps code wgsl]
-                (with-deps deps {:value wgsl}))))
+              (fn link [deps code wgsl]
+                (with-deps deps {:wgsl wgsl :x x :y y :z z
+                                 :io nil}))))
+
+(defn- select-node [deps kind]
+  (->> deps
+       (filter #(= kind (::kind %)))
+       (map ::uuid)
+       (into #{})))
+
+(defn- gen-io [ids]
+  (if (empty? ids)
+    `(bllm.wgsl/empty-io)
+    `(bllm.wgsl/gen-io ~(hash ids) (bllm.util/array ~@ids))))
+
+(defn- compile-io [stage env body]
+  (compile-fn env body
+              (fn link [deps code wgsl]
+                (let [ids-stage  (select-node deps stage)
+                      ids-raster (select-node deps :interpolant)]
+                  (-> #(let [id (::uuid %)]
+                         (or (ids-stage id) (ids-raster id)))
+                      (remove deps)
+                      (with-deps
+                        {:wgsl  wgsl
+                         :stage (gen-io ids-stage)
+                         :io    (gen-io ids-raster)}))))))
+
+(defnode defvertex
+  "Defines a vertex shader entry point."
+  {:keys [:stage :io :wgsl]}
+  [sym & body]
+  (compile-io :vertex-attr &env body))
+
+(defnode defpixel
+  "Defines a fragment shader entry point."
+  {:keys [:stage :io :wgsl]}
+  [sym & body]
+  (compile-io :draw-buffer &env body))
 
 
 ;;; Resource Groups
@@ -824,15 +834,15 @@
                           (cons g grps)))))]
     (with-meta grps {:deps deps})))
 
-;; constructor for resource bindings
+;; TODO constructor for resource bindings
 (defnode defgroup
-  {:wgsl false :wrap true}
+  {:wgsl false :keys [:value]}
   [sym & binds]
   (resolve-bindings &env binds ::bind
                     #{:uniform :storage :texture :sampler}
                     emit-group))
 
-;; gpu/defres for layout object
+;; TODO gpu/defres for layout object
 (defnode deflayout
   {:wgsl false}
   [sym & groups]

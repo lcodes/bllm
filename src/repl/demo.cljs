@@ -26,18 +26,18 @@
 (wgsl/defconst PI*2 6.2831853071795864)
 (wgsl/defconst EPSILON 1e-10)
 
-(wgsl/definterpolant io-texcoord 0 :vec2)
+(wgsl/definterpolant io-texcoord    0 :vec2)
 (wgsl/definterpolant io-texcoord-3d 1 :vec3)
 
 (wgsl/defsampler linear-mip FRAME 1)
 
-  (wgsl/defuniform frame
-    ""
-    FRAME 0
-    [time       :vec4]
-    [sin-time   :vec4]
-    [delta-time :vec4]
-    [number     :u32])
+(wgsl/defuniform frame
+  ""
+  FRAME 0
+  [time       :vec4]
+  [sin-time   :vec4]
+  [delta-time :vec4]
+  [number     :u32])
 
 (wgsl/defuniform screen
   PASS 3
@@ -65,11 +65,9 @@
   "Generic pixel color.")
 
 (wgsl/defvertex vs-demo
-  "Vertex shader in ClojureScript!"
   (io-position = in-position))
 
 (wgsl/defpixel ps-demo
-  "Fragment/pixel shader in ClojureScript!"
   (out-color = (vec4 0.42 0.69 0 1)))
 
 (wgsl/deftexture tex-skybox PASS 0 :tex-cube :f32)
@@ -81,6 +79,9 @@
                         (vec4 1)
                         (* camera.view-proj)
                         (.xyww))))
+
+(comment (js/console.log vs-sky.wgsl)
+         (js/console.log ps-sky.wgsl))
 
 (wgsl/defpixel ps-sky
   (out-color = (texture-sample tex-skybox linear-mip io-texcoord-3d)))
