@@ -64,7 +64,6 @@
 (defn- emit-struct
   [env sym fields]
   ;; TODO ctor -> ab? offset? -> dataview
-  ;; - attach array of fields as ctor prop, pass ctor to node ctor
 
   (with-meta `(util/array ~@(map emit-field fields))
     (->> (map :type fields)
@@ -371,7 +370,7 @@
                   >= 9
                   == 10
                   &  11
-                  ;; xor
+                  ;; TODO xor (^ is already used by the reader to dispatch metadata literals)
                   |  13
                   && 14
                   || 15
@@ -452,13 +451,19 @@
        :bind (vec (reverse out))
        :body (parse-all ctx env body)}
       (let [[k v] (first pairs)
-            node {:op :binding
-                  :name k
+            node {:op    :binding
+                  :name  k
                   ::name (util/kebab->camel k)
-                  :init (parse ctx env v)}]
+                  :init  (parse ctx env v)}]
         (recur (assoc env k node)
                (conj out node)
                (next pairs))))))
+
+(defmethod parse* 'if [ctx env _ [cond then else]]
+  {:op   :if
+   :cond (parse ctx env cond)
+   :then (parse ctx env then)
+   :else (parse ctx env else)})
 
 (defn- resolve-var [ctx sym]
   (when-let [v (ana/resolve-existing-var (:cljs-env ctx) sym)]
@@ -536,20 +541,23 @@
 ;; TODO generate source maps
 ;; TODO advanced optimizations (rename vars, remove dead code, etc)
 
-(defmulti gen* :op)
+(def ^:private ^:dynamic *indent* 0)
+(def ^:private ^:dynamic *return* nil) ; nil, :ret or {:op :binding} -> side-effect, fn scope, let scope
+
+(defmulti ^:private gen* :op)
 
 (defmethod gen* :default [node]
   (throw (ex-info (pr-str node) {:node node})))
 
-(defn- needs-semicolon? [{:keys [op]}]
-  (not= :let op))
+(def ^:private block? #{:do :if :let :loop})
 
-(def ^:dynamic *return*
-  "Bound to `true` when entering `gen*` from `defun`, `false` otherwise."
-  false)
+(def ^:private block-node? (comp block? :op))
 
-(def ^:dynamic *indent*
-  0)
+(def ^:private needs-semicolon? (comp not block-node?))
+
+(defmacro ^:private with-indent [& exprs]
+  `(binding [*indent* (inc *indent*)]
+     ~@exprs))
 
 (defn- indent []
   (print (util/spaces *indent*)))
@@ -560,28 +568,6 @@
   ([node]
    (when (needs-semicolon? node)
      (semicolon))))
-
-;; TODO support assignment to vars too (let [x (let ...)])
-;;  -> thread "x = " to inner let, instead of "return "
-(defn- gen-block [stmts]
-  (binding [*return* false] ; Side-effect statements
-    (doseq [node (butlast stmts)]
-      (indent) ; TODO not first augh
-      (gen* node)
-      (semicolon node)))
-  (when-let [node (last stmts)] ; Return statement
-    (let [ret? *return* ; Push `return` to the end of the innermost `let`.
-          let? (= :let (:op node))]
-      (when-not let?
-        (indent)
-        (when ret?
-          (print "return ")))
-      (binding [*return* (and ret? let?)]
-        (gen* node))
-      (semicolon node))))
-
-(defmethod gen* :do [{:keys [body]}]
-  (gen-block body))
 
 (defn- pr-name [node]
   (print (::name node)))
@@ -618,24 +604,68 @@
     :f (print \f)
     nil))
 
+(defn- gen-result []
+  (if (= *return* :ret)
+    (print "return ")
+    (some-> *return* ::name (print "= "))))
+
+(defn- gen-block [stmts]
+  (binding [*return* nil] ; Statements (side-effects execution)
+    (doseq [node (butlast stmts)]
+      (indent)
+      (gen* node)
+      (semicolon node)))
+  (when-let [node (last stmts)] ; Terminator (control-flow evaluation)
+    (let [block (block-node? node)]
+      (when-not block
+        (indent)
+        (gen-result))
+      (binding [*return* (and block *return*)]
+        (gen* node))
+      (semicolon node))))
+
+(defmethod gen* :do [{:keys [body]}]
+  (gen-block body))
+
+(defmethod gen* :if [{:keys [cond then else]}]
+  (print "if (") (gen* cond) (print ") {") (newline)
+  (with-indent
+    (indent) (gen-result) (gen* then) (semicolon then))
+  (indent) (print \}) (newline)
+  (when else
+    (indent) (print "else ")
+    (if (= :if (:op else))
+      (gen* else)
+      (do (print \{) (newline)
+          (with-indent
+            (indent) (gen-result) (gen* else) (semicolon else))
+          (indent) (print \}) (newline)))))
+
 (defmethod gen* :let [{:keys [bind body]}]
-  ;; TODO introduce block scope as needed; map lexical scope in CLJS to lifetime in WGSL
-  (doseq [{:keys [name init] :as node} bind]
+  (doseq [{:keys [name init] :as node} bind
+          :let [is-block? (block-node? init)]]
     (indent)
     (let [m (meta name)]
-      (print (cond (:const m) "const"
-                   (:mut   m) "var"
-                   :else      "let")))
+      (print (if is-block?
+               "var"
+               (cond (:const m) "const"
+                     (:mut   m) "var"
+                     :else      "let"))))
     (print \space)
     (pr-name node)
     ;; TODO tag
-    (when init
-      (print " = ")
-      (gen* init))
-    (semicolon))
+    (if is-block?
+      (do (semicolon) (indent)
+          (binding [*return* node]
+            (gen* init)))
+      (do (when init
+            (print " = ")
+            (gen* init))
+          (semicolon))))
   (gen-block body))
 
 (defmethod gen* :call [{:keys [fn xs]}]
+  ;; TODO dont be so aggressive on outputting parens
   (case (:op fn)
     :op-fn ; Built-in WGSL operators, infix syntax.
     (let [fname (:name fn)]
@@ -742,7 +772,7 @@
                                      ~(::name arg)
                                      ~(util/keyword->wgsl (:tag arg)))))}))
          (compile-fn env (if ret (next body) body))
-         (binding [*return* true]))))
+         (binding [*return* :ret]))))
 
 (defnode defkernel
   "Defines a compute shader entry point.

@@ -80,7 +80,8 @@
                         (* camera.view-proj)
                         (.xyww))))
 
-(comment (js/console.log vs-sky.wgsl)
+(comment (js/console.log vs-sky)
+         (js/console.log vs-sky.wgsl)
          (js/console.log ps-sky.wgsl))
 
 (wgsl/defpixel ps-sky
@@ -264,9 +265,9 @@
 (wgsl/deftexture grain-tex   EFFECT 2 :tex-2d :f32)
 (wgsl/deftexture grading-lut EFFECT 3 :tex-3d :f32)
 
+;; TODO handle var shadowing (here `ru`)
+;; TODO handle result threading (`return` or using `do`, `let` or `if` as expressions)
 (wgsl/defun ^:feature distort-uv [uv :vec2]
-  uv
-  #_
   (let [center pp.dist1.xy ; TODO don't want to manually pack/unpack such things
         axis   pp.dist1.zw
         theta  pp.dist2.x
@@ -277,10 +278,10 @@
         ruv (axis * (uv - 0.5 - center))
         ru  (length ruv)
         rus (ru * sigma)
-        ru  (if (intensity > 0)
+        ru' (if (ampli > 0)
               ((tan (ru * theta)) * (1 / rus))
               ((1 / ru) * theta * (atan rus)))]
-    (uv + ruv * (ru - 1))))
+    (uv + ruv * (ru' - 1))))
 
 (wgsl/defun ^:feature bloom [c :vec3 uv :vec2]
   (c + (.rgb (texture-load bloom-tex uv 0)) * pp.bloom.rgb + pp.bloom.w))
@@ -359,6 +360,8 @@
 (js/console.log lighting.wgsl)
 (js/console.log lighting-cs.wgsl)
 (js/console.log window-depth.wgsl)
+(js/console.log distort-uv.wgsl)
+
 
 #_
 (defn test [pos b]

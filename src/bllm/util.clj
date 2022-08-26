@@ -38,6 +38,7 @@
    \= "_EQ_"
    \< "_LT_"
    \> "_GT_"
+   \' "_P_"
    \? "_Q_"})
 
 (defn- kebab-capitalize [s re]

@@ -84,13 +84,15 @@
 (defm defenum
   "An enumerated type whose domain set is explicitly specified."
   [sym & elems]
-  (let [m (meta sym)
+  (let [m    (meta sym)
+        rev? (:reverse m)
+        dir  (if rev? dec inc)
         repr (when (and (<= 2 (count elems))
                         (or (keyword? (second elems))
                             (string?  (second elems))))
                (partition 2 elems))
         xs (loop [elems (if repr (map first repr) elems)
-                  value 0
+                  value (if rev? -1 0)
                   xs    ()]
              (if-not elems
                (reverse xs)
@@ -98,7 +100,7 @@
                      v (if (vector? x) (second x) value)
                      s (if (vector? x) (first  x) x)]
                  (recur (next elems)
-                        (long (inc v))
+                        (long (dir v))
                         (conj xs [s v])))))]
     `(do
        ;; Emit each enumerated element as a separate constant definition.

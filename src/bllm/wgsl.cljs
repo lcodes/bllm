@@ -6,7 +6,7 @@
   (:require [bllm.base]
             [bllm.gpu  :as gpu]
             [bllm.meta :refer [defenum]]
-            [bllm.util :as util :refer [defconst def1 === str!]]))
+            [bllm.util :as util :refer [def1 === str!]]))
 
 (set! *warn-on-infer* true)
 
@@ -113,13 +113,25 @@
 (defn gpu-full-texture-type [node]
   (str (gpu-texture-type node.tex) \< (gpu-prim-type node.type) \>))
 
-(defconst builtin
+(defenum builtin
   "Special value for built-in bindings."
-  -1)
+  {:repr :string :reverse true}
+  vertex-index
+  instance-index
+  position
+  front-facing
+  frag-depth
+  local-invocation-id
+  local-invocation-index
+  global-invocation-id
+  workgroup-id
+  num-workgroups
+  sample-index
+  sample-mask)
 
 (defn- io-bind [slot]
-  (if (=== builtin slot)
-    "builtin"
+  (if (neg? slot)
+    (builtin slot) ; TODO this syntax is wrong
     slot))
 
 (defn- emit-enum [node]
