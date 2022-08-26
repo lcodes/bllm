@@ -453,8 +453,11 @@
       (let [[k v] (first pairs)
             node {:op    :binding
                   :name  k
-                  ::name (util/kebab->camel k)
-                  :init  (parse ctx env v)}]
+                  :init  (parse ctx env v)
+                  ::name (util/kebab->camel
+                          (if-not (contains? env k)
+                            k ; Unshadowed ident
+                            (gensym (name k))))}]
         (recur (assoc env k node)
                (conj out node)
                (next pairs))))))
@@ -555,10 +558,6 @@
 
 (def ^:private needs-semicolon? (comp not block-node?))
 
-(defmacro ^:private with-indent [& exprs]
-  `(binding [*indent* (inc *indent*)]
-     ~@exprs))
-
 (defn- indent []
   (print (util/spaces *indent*)))
 
@@ -604,10 +603,16 @@
     :f (print \f)
     nil))
 
-(defn- gen-result []
-  (if (= *return* :ret)
-    (print "return ")
-    (some-> *return* ::name (print "= "))))
+(defn- gen-stmt [node]
+  (let [block (block-node? node)]
+    (when-not block
+      (indent)
+      (if (= *return* :ret)
+        (print "return ")
+        (some-> *return* ::name (print "= "))))
+    (binding [*return* (and block *return*)]
+      (gen* node))
+    (semicolon node)))
 
 (defn- gen-block [stmts]
   (binding [*return* nil] ; Statements (side-effects execution)
@@ -616,46 +621,49 @@
       (gen* node)
       (semicolon node)))
   (when-let [node (last stmts)] ; Terminator (control-flow evaluation)
-    (let [block (block-node? node)]
-      (when-not block
-        (indent)
-        (gen-result))
-      (binding [*return* (and block *return*)]
-        (gen* node))
-      (semicolon node))))
+    (gen-stmt node)))
 
 (defmethod gen* :do [{:keys [body]}]
   (gen-block body))
 
+(defn- gen-clause [node]
+  (print " {")
+  (newline)
+  (binding [*indent* (inc *indent*)]
+    (gen-stmt node))
+  (indent)
+  (print \})
+  (newline))
+
 (defmethod gen* :if [{:keys [cond then else]}]
-  (print "if (") (gen* cond) (print ") {") (newline)
-  (with-indent
-    (indent) (gen-result) (gen* then) (semicolon then))
-  (indent) (print \}) (newline)
+  ;; TODO support cond being a block. (if (let [...] ...) ...) is a valid form
+  (print "if (")
+  (gen* cond)
+  (print ")")
+  (gen-clause then)
   (when else
-    (indent) (print "else ")
+    (indent)
+    (print "else")
     (if (= :if (:op else))
       (gen* else)
-      (do (print \{) (newline)
-          (with-indent
-            (indent) (gen-result) (gen* else) (semicolon else))
-          (indent) (print \}) (newline)))))
+      (gen-clause else))))
 
 (defmethod gen* :let [{:keys [bind body]}]
   (doseq [{:keys [name init] :as node} bind
-          :let [is-block? (block-node? init)]]
+          :let [m (meta name)
+                is-block? (block-node? init)]]
     (indent)
-    (let [m (meta name)]
-      (print (if is-block?
-               "var"
-               (cond (:const m) "const"
-                     (:mut   m) "var"
-                     :else      "let"))))
+    (print (if is-block?
+             "var"
+             (cond (:const m) "const"
+                   (:mut   m) "var"
+                   :else      "let")))
     (print \space)
     (pr-name node)
-    ;; TODO tag
+    ;; TODO type tag
     (if is-block?
-      (do (semicolon) (indent)
+      (do (semicolon)
+          (indent)
           (binding [*return* node]
             (gen* init)))
       (do (when init

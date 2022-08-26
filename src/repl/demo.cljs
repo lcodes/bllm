@@ -265,8 +265,6 @@
 (wgsl/deftexture grain-tex   EFFECT 2 :tex-2d :f32)
 (wgsl/deftexture grading-lut EFFECT 3 :tex-3d :f32)
 
-;; TODO handle var shadowing (here `ru`)
-;; TODO handle result threading (`return` or using `do`, `let` or `if` as expressions)
 (wgsl/defun ^:feature distort-uv [uv :vec2]
   (let [center pp.dist1.xy ; TODO don't want to manually pack/unpack such things
         axis   pp.dist1.zw
@@ -278,10 +276,10 @@
         ruv (axis * (uv - 0.5 - center))
         ru  (length ruv)
         rus (ru * sigma)
-        ru' (if (ampli > 0)
+        ru  (if (ampli > 0)
               ((tan (ru * theta)) * (1 / rus))
               ((1 / ru) * theta * (atan rus)))]
-    (uv + ruv * (ru' - 1))))
+    (uv + ruv * (ru - 1))))
 
 (wgsl/defun ^:feature bloom [c :vec3 uv :vec2]
   (c + (.rgb (texture-load bloom-tex uv 0)) * pp.bloom.rgb + pp.bloom.w))
