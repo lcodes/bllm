@@ -32,9 +32,7 @@
             `(set! (. ~desc-sym ~(symbol (str \- arg))) ~arg))
         ~(if-not create?
            'js/undefined
-           `(let [^js/GPUObjectBase obj# (. ~'device ~create ~desc-sym)]
-              (set! (.-label obj#) ~'label) ; TODO compat only! dev browser doesn't take label from descriptor
-              obj#))))))
+           `(. ~'device ~create ~desc-sym))))))
 
 (defm ^:private defgpu
   "Generates a constructor function for the specified WebGPU object type."

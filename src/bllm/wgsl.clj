@@ -591,6 +591,7 @@
 ;; TODO advanced optimizations (rename vars, remove dead code, etc)
 
 (def ^:private ^:dynamic *indent* 0)
+(def ^:private ^:dynamic *parens* false)
 (def ^:private ^:dynamic *return* nil) ; nil, :ret or {:op :binding} -> side-effect, fn scope, let scope
 
 (defmulti ^:private gen* :op)
@@ -601,6 +602,8 @@
 (def ^:private block? #{:do :if :let :loop})
 
 (def ^:private block-node? (comp block? :op))
+
+(def ^:private needs-indent? (disj block? :let))
 
 (def ^:private needs-semicolon? (comp not block-node?))
 
@@ -708,7 +711,8 @@
     ;; TODO type tag
     (if is-block?
       (do (semicolon)
-          (indent)
+          (when (not= :let (:op init))
+            (indent))
           (binding [*return* node]
             (gen* init)))
       (do (when init
@@ -720,37 +724,38 @@
   (gen-block body))
 
 (defmethod gen* :call [{:keys [fn xs]}]
-  ;; TODO dont be so aggressive on outputting parens
   (case (:op fn)
     :op-fn ; Built-in WGSL operators, infix syntax.
     (let [fname (:name fn)]
-      (print \()
-      (case (count xs)
-        0 (throw (ex-info "Expecting arguments" {:fn fn}))
-        1 (do (print fname) ; Unary; (- operand)
-              (gen* (first xs)))
-        2 (do (gen* (first xs)) ; Binary; (operand + operand)
-              (print \space)
-              (print fname)
-              (print \space)
-              (gen* (second xs)))
-        (do (gen* (first xs)) ; Lispy; (* operand operand operand ...)
-            (loop [[x & xs] xs]
-              (print \space)
-              (print fname)
-              (print \space)
-              (gen* x)
-              (some-> xs (recur)))))
-      (print \)))
+      (when *parens* (print \())
+      (binding [*parens* true] ; Simple rule: parens all the nested operators.
+        (case (count xs)
+          0 (throw (ex-info "Expecting arguments" {:fn fn}))
+          1 (do (print fname) ; Unary; (- operand)
+                (gen* (first xs)))
+          2 (do (gen* (first xs)) ; Binary; (operand + operand)
+                (print \space)
+                (print fname)
+                (print \space)
+                (gen* (second xs)))
+          (do (gen* (first xs)) ; Lispy; (* operand operand operand ...)
+              (loop [[x & xs] xs]
+                (print \space)
+                (print fname)
+                (print \space)
+                (gen* x)
+                (some-> xs (recur))))))
+      (when *parens* (print \))))
 
     (:var :wgsl) ; Named calls, fn can be user defined or built in WGSL.
     (do (gen* fn)
         (print \()
-        (doseq [x (butlast xs)]
-          (gen* x)
-          (print ", "))
-        (when-let [x (last xs)]
-          (gen* x))
+        (binding [*parens* false] ; Comma has highest precedence, can omit parens.
+          (doseq [x (butlast xs)]
+            (gen* x)
+            (print ", "))
+          (when-let [x (last xs)]
+            (gen* x)))
         (print \)))
 
     (throw (ex-info "Unexpected function value" {:func fn}))))

@@ -55,7 +55,7 @@
 
 (wgsl/defuniform hello EFFECT 0
   [switch :bool])
-#_
+
 (wgsl/defun branch-test :vec3 [a :vec3 b :vec3]
   (let [d (length (a - b))
         d (cond
@@ -70,8 +70,13 @@
       (a + b * d)
       (a * b))))
 
-#_
-(js/console.log branch-test.wgsl)
+(wgsl/defun nested-let :i32 []
+  (let [x (let [y (let [z 12]
+                    (+ z 2))]
+            (* y 8))]
+    (/ x 2)))
+
+(comment (js/console.log branch-test.wgsl))
 
 (wgsl/defbuiltin vertex-index         :vertex   :in  :u32)
 (wgsl/defbuiltin instance-index       :vertex   :in  :u32)
