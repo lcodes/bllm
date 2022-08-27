@@ -70,10 +70,23 @@
       (a + b * d)
       (a * b))))
 
+(wgsl/defun case-test :u32 [x :u32]
+  (case x
+    (1
+     2
+     3) (* x 2)
+    100 (* x 3)
+    101 (* x 5)
+    x))
+
+(wgsl/defun block-test :u32 []
+  (do 1 2 3))
+
 (wgsl/defun nested-let :i32 []
   (let [x (let [y (let [z 12]
                     (+ z 2))]
-            (* y 8))]
+            (let [out (* y 8)]
+              (1 + out * out)))]
     (/ x 2)))
 
 (comment (js/console.log branch-test.wgsl))
@@ -639,8 +652,6 @@ fn demo_frag() -> @location(0) vec4<f32> {
          js/undefined ; multisample
          ))
   )
-
-
 
 
 

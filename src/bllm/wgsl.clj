@@ -478,10 +478,34 @@
 
 (defmulti parse* #'parse-dispatch)
 
+;; TODO convert throw to discard on GPU?
+
 (defmethod parse* :default [ctx env f args]
   {:op :call
-   :fn (parse ctx env f)
+   :fn (parse     ctx env f)
    :xs (parse-all ctx env args)})
+
+(defmethod parse* 'do [ctx env _ body]
+  {:op   :do
+   :body (parse-all ctx env body)})
+
+(defmethod parse* 'if [ctx env _ [cond then else]]
+  (if (or (true? cond) (keyword? cond)) ; Commonly generated pattern, ie `cond`
+    (parse ctx env then) ; Reduce (if `true` expr) to just expr
+    {:op   :if
+     :cond (parse ctx env cond)
+     :then (parse ctx env then)
+     :else (parse ctx env else)}))
+
+(defmethod parse* 'case* [ctx env _ [expr cases clauses default]]
+  ;; TODO assuming `case` -> `case*` macro expansion and valid arguments
+  ;; TODO map `fallthrough` as a special form inside clauses
+  (let [p (partial parse ctx env)]
+    {:op       :case
+     :expr     (p expr)
+     :cases    (mapv #(mapv p %) cases)
+     :clauses  (mapv p clauses)
+     :default  (p default)}))
 
 (defmethod parse* 'let* [ctx env _ [bindings & body]]
   (when-not (even? (count bindings))
@@ -505,13 +529,12 @@
                (conj out node)
                (next pairs))))))
 
-(defmethod parse* 'if [ctx env _ [cond then else]]
-  (if (or (true? cond) (keyword? cond))
-    (parse ctx env then)
-    {:op   :if
-     :cond (parse ctx env cond)
-     :then (parse ctx env then)
-     :else (parse ctx env else)}))
+(defmethod parse* 'loop [ctx env _ body]
+  ;; TODO support both `recur` and `continue`/`break`/`return` styles of looping.
+  ;; former is idiomatic clojure, later is idiomatic WGSL; both can coexist
+  ;;
+  ;; can build more exotic or specific loops with the usual `defmacro` on top.
+  )
 
 (defn- resolve-var [ctx sym]
   (when-let [v (ana/resolve-existing-var (:cljs-env ctx) sym)]
@@ -563,10 +586,10 @@
     (if (not= '. f)
       (parse* cljs env f args)
       (let [sym (second args)]
-        {:op :field
-         :in (parse cljs env (first args))
-         :name sym
-         ::expr (util/kebab->camel sym)}))))
+        {:op    :field
+         :name  sym
+         ::expr (util/kebab->camel sym)
+         :in    (parse cljs env (first args))}))))
 
 (defn- parse-lit [cljs env form]
   {:op :lit
@@ -599,7 +622,7 @@
 (defmethod gen* :default [node]
   (throw (ex-info (pr-str node) {:node node})))
 
-(def ^:private block? #{:do :if :let :loop})
+(def ^:private block? #{:case :do :if :let :loop})
 
 (def ^:private block-node? (comp block? :op))
 
@@ -610,9 +633,13 @@
 (defn- indent []
   (print (util/spaces *indent*)))
 
+(defn- newline []
+  (print \newline))
+
 (defn- semicolon
   ([]
-   (println \;))
+   (print \;)
+   (newline))
   ([node]
    (when (needs-semicolon? node)
      (semicolon))))
@@ -664,7 +691,7 @@
 (defn- gen-block [stmts]
   (binding [*return* nil] ; Statements (side-effects execution)
     (doseq [node (butlast stmts)]
-      (indent)
+      ;(indent)
       (gen* node)
       (semicolon node)))
   (when-let [node (last stmts)] ; Terminator (control-flow evaluation)
@@ -673,28 +700,54 @@
 (defmethod gen* :do [{:keys [body]}]
   (gen-block body))
 
-(defn- gen-clause [node]
+(defn- enter-block []
   (print " {")
-  (newline)
-  (binding [*indent* (inc *indent*)]
-    (gen-stmt node))
+  (newline))
+
+(defn- leave-block []
   (indent)
   (print \})
   (newline))
 
+(defmacro with-indent [& exprs]
+  `(binding [*indent* (inc *indent*)]
+     ~@exprs))
+
+(defmacro with-block [& exprs]
+  `(do (enter-block)
+       (with-indent ~@exprs)
+       (leave-block)))
+
 (defmethod gen* :if [{:keys [cond then else]}]
-  ;; TODO support cond being a block. (if (let [...] ...) ...) is a valid form
-  (print "if (")
+  (print "if ")
   (gen* cond)
-  (print ")")
-  (gen-clause then)
+  (with-block
+    (gen-stmt then))
   (when else
     (indent)
     (print "else")
     (if (not= :if (:op else))
-      (gen-clause else)
-      (do (print \space)
-          (gen* else)))))
+      (with-block
+        (gen-stmt else))
+      (do
+        (print \space)
+        (gen* else)))))
+
+(defmethod gen* :case [{:keys [expr cases clauses default]}]
+  (assert (= (count cases)
+             (count clauses)))
+  (print "switch ")
+  (gen* expr)
+  (with-block
+    (dotimes [n (count cases)]
+      (indent)
+      (print "case ")
+      (with-block
+        (gen-stmt (nth clauses n))))
+    (indent)
+    (print "default")
+    (with-block
+      (gen-stmt default))))
 
 (defmethod gen* :let [{:keys [bind body]}]
   (doseq [{:keys [name init] :as node} bind
@@ -711,7 +764,7 @@
     ;; TODO type tag
     (if is-block?
       (do (semicolon)
-          (when (not= :let (:op init))
+          (when (needs-indent? init)
             (indent))
           (binding [*return* node]
             (gen* init)))
