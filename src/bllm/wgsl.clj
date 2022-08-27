@@ -9,7 +9,7 @@
 
   The goal is to write GPU definitions transparently alongside the CPU ones.
   Leverage figwheel to hot-reload shader code the same way it does with JS."
-  (:refer-clojure :exclude [defstruct])
+  (:refer-clojure :exclude [defstruct newline])
   (:require [cljs.analyzer  :as ana]
             [clojure.inspector :refer [inspect]]
             [clojure.string :as str]
@@ -73,9 +73,9 @@
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
-  [& {:keys [sym expr wgsl kind ctor deps args]}]
+  [& {:keys [sym expr wgsl hash kind ctor deps args]}]
   (let [uuid (gpu-id (str *ns*) (name sym))
-        hash (gpu-hash args)
+        hash (or  hash (gpu-hash args))
         name (and wgsl (gpu-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
                wgsl (vary-meta assoc ::name name)
@@ -161,6 +161,7 @@
           :sym  ~node
           :expr ~(:expr attrs)
           :wgsl ~(:wgsl attrs true)
+          :hash (::hash ~gmeta)
           :kind ~kind
           :ctor '~(util/keyword->wgsl kind)
           :deps ~(when (has-deps? (util/sym kind))
@@ -841,8 +842,8 @@
 ;;; Shader Code - Declarations of Constants, Variables, Functions & Entry Points
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- with-deps [deps x]
-  (with-meta x {:deps (mapv ::uuid deps)}))
+(defn- with-deps [deps hash x]
+  (with-meta x {::hash hash :deps (mapv ::uuid deps)}))
 
 (defnode defenum
   [sym & args]) ; TODO like meta/defenum, but emits WGSL
@@ -873,8 +874,6 @@
    :tag tag
    :local :arg})
 
-;; TODO gensyms cause different hashes on every execution
-;; - generate hash from user inputs, not compiler outputs
 (defnode defun
   {:props false :kind :function
    :keys [:ret :args :wgsl]
@@ -888,7 +887,7 @@
                   (assoc &env :locals))] ; Make args visible to cljs' analyzer
     (->> (fn link [deps code wgsl]
                     ;; TODO type inference on let bindings -> ret
-                    (with-deps deps
+                    (with-deps deps (gpu-hash args|ret body)
                       {:wgsl wgsl
                        :ret  (util/keyword->wgsl (or ret :f32)) ;; TODO default to type inference
                        :args `(cljs.core/array
@@ -936,7 +935,7 @@
                                                             :compute :in))]
                   (-> #(ids (::uuid %))
                       (remove deps)
-                      (with-deps
+                      (with-deps (gpu-hash x y z body)
                         {:in (gen-io ids) :x x :y y :z z :wgsl wgsl}))))))
 
 (defn- compile-io [stage in out env body]
@@ -948,7 +947,7 @@
                          (or (ids-i id)
                              (ids-o id)))
                       (remove deps)
-                      (with-deps
+                      (with-deps (gpu-hash body)
                         {:wgsl  wgsl
                          :in   (gen-io ids-i)
                          :out  (gen-io ids-o)}))))))
