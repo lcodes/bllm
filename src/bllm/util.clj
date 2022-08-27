@@ -63,6 +63,9 @@
          (kebab->camel  :foo->bar)
          (kebab->pascal :test-hello-world))
 
+(defn kebab->snake [s]
+  (str/replace (name s) \- \_))
+
 (def flatten1 (partial apply concat))
 
 (defn align [alignment size]
@@ -74,13 +77,15 @@
 
 (defn keyword->enum
   "Converts keywords to the matching constants."
-  [default-ns x]
-  (if-not (keyword? x)
-    x
-    (-> (namespace x)
-        (or default-ns)
-        (name)
-        (symbol (name x)))))
+  ([ns x]
+   (keyword->enum ns x nil))
+  ([ns x prefix]
+   (if-not (keyword? x)
+     x
+     (-> (namespace x)
+         (or ns)
+         (name)
+         (symbol (str prefix (name x)))))))
 
 (def ns-gpu  "bllm.gpu")
 (def ns-lib  "bllm.base")
@@ -89,7 +94,7 @@
 (def keyword->gpu  (partial keyword->enum ns-gpu))
 (def keyword->wgsl (partial keyword->enum ns-wgsl))
 
-(comment (keyword->enum "hello" ::foo-bar))
+(comment (keyword->enum "hello" ::foo-bar "hi-"))
 
 (defn to-js
   "Emits the given data form as a JavaScript literal."

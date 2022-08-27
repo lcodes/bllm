@@ -27,9 +27,6 @@
 (wgsl/defconst EPSILON 1e-10)
 
 (wgsl/definterpolant io-texcoord    0 :vec2)
-(wgsl/definterpolant io-texcoord-3d 1 :vec3)
-
-(wgsl/defsampler linear-mip FRAME 1)
 
 (wgsl/defuniform frame
   ""
@@ -55,37 +52,80 @@
   [proj-inv      :mat4]
   [view-proj-inv :mat4])
 
-(wgsl/defvertex-attr in-position 0 :vec3
+
+(wgsl/defuniform hello EFFECT 0
+  [switch :bool])
+#_
+(wgsl/defun branch-test :vec3 [a :vec3 b :vec3]
+  (let [d (length (a - b))
+        d (cond
+            (d > 10) 0.25
+            (d >  5) 0.75
+            :else 1)
+        b (-> (cross a b)
+              (vec4 1)
+              (* camera.view-proj)
+              (normalize))]
+    (if hello.switch
+      (a + b * d)
+      (a * b))))
+
+#_
+(js/console.log branch-test.wgsl)
+
+(wgsl/defbuiltin vertex-index         :vertex   :in  :u32)
+(wgsl/defbuiltin instance-index       :vertex   :in  :u32)
+(wgsl/defbuiltin position             :vertex   :out :vec4)
+(wgsl/defbuiltin frag-coord           :fragment :in  :vec4 {:name "position"})
+(wgsl/defbuiltin front-facing         :fragment :in  :bool)
+(wgsl/defbuiltin frag-depth           :fragment :out :f32)
+(wgsl/defbuiltin local-invocation-id  :compute  :in  :u32)
+(wgsl/defbuiltin global-invocation-id :compute  :in  :uvec3)
+(wgsl/defbuiltin workgroup-id         :compute  :in  :uvec3)
+(wgsl/defbuiltin num-workgroups       :compute  :in  :uvec3)
+(wgsl/defbuiltin sample-index         :fragment :in  :u32)
+(wgsl/defbuiltin sample-mask-in       :fragment :in  :u32 {:name "sample_mask"})
+(wgsl/defbuiltin sample-mask          :fragment :out :u32)
+
+
+(wgsl/defvertex-attr local-position 0 :vec3
   "Unpacked vertex position in model space.")
 
-(wgsl/definterpolant io-position :builtin :vec4
-  "Unpacked vertex position in clip space. Required vertex output.")
-
-(wgsl/defdraw-target out-color 0 :vec4
-  "Generic pixel color.")
+(wgsl/defdraw-target frag-color 0 :vec4
+  "Generic fragment draw target.")
 
 (wgsl/defvertex vs-demo
-  (io-position = in-position))
+  "Hello triangle!"
+  (position = local-position))
 
 (wgsl/defpixel ps-demo
-  (out-color = (vec4 0.42 0.69 0 1)))
+  (frag-color = (vec4 0.42 0 0.69 1)))
 
-(wgsl/deftexture tex-skybox PASS 0 :tex-cube :f32)
+(wgsl/definterpolant io-texcoord-3d 0 :vec3)
+
+(wgsl/defsampler linear-mip FRAME 1)
+
+(wgsl/deftexture tex-skybox EFFECT 0 :tex-cube :f32)
 
 (wgsl/defvertex vs-sky
-  (io-texcoord-3d = (normalize in-position))
-  (io-position    = (-> camera.view-inv.3.xyz
-                        (+ in-position)
-                        (vec4 1)
-                        (* camera.view-proj)
-                        (.xyww))))
-
-(comment (js/console.log vs-sky)
-         (js/console.log vs-sky.wgsl)
-         (js/console.log ps-sky.wgsl))
+  "Infinitely large cube projected around the camera."
+  (io-texcoord-3d = (normalize local-position))
+  (position = (-> camera.view-inv.3.xyz
+                  (+ local-position)
+                  (vec4 1)
+                  (* camera.view-proj)
+                  (.xyww))))
 
 (wgsl/defpixel ps-sky
-  (out-color = (texture-sample tex-skybox linear-mip io-texcoord-3d)))
+  "Should get the same output `GenIO` as `ps-demo`."
+  (frag-color = (texture-sample tex-skybox linear-mip io-texcoord-3d)))
+
+
+(comment (js/console.log vs-demo.wgsl)
+         (js/console.log ps-demo.wgsl)
+
+         (js/console.log vs-sky.wgsl)
+         (js/console.log ps-sky.wgsl))
 
 (wgsl/defun screen-pos :vec4 [pos :vec4]
   (let [h (pos * 0.5)]
@@ -348,7 +388,8 @@
         lo (texture upsample-tex xy)] ; TODO generic storage input
     (texture-store out-color xy (vec4 (mix hi.rgb lo.rgb pp.scatter) 1))))
 
-(comment (wgsl/compile lighting-cs))
+(comment
+  (wgsl/compile lighting-cs)
 
 (js/console.log screen-pos.wgsl)
 (js/console.log rgb->hsv.wgsl)
@@ -359,7 +400,8 @@
 (js/console.log lighting-cs.wgsl)
 (js/console.log window-depth.wgsl)
 (js/console.log distort-uv.wgsl)
-
+(js/console.log lighting-cs)
+  )
 
 #_
 (defn test [pos b]
@@ -571,7 +613,7 @@ fn demo_frag() -> @location(0) vec4<f32> {
 
   #_
   (gpu/vertex shader-mod "demo_vert"
-              #js [#js {:attributes #js [#js {:shaderLocation in-position.bind
+              #js [#js {:attributes #js [#js {:shaderLocation local-position.bind
                                               :offset 0
                                               :format "float32x4"}]
                         :arrayStride 16

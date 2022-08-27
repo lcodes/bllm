@@ -73,19 +73,20 @@
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
-  [wgsl? enum-ns sym kind ctor deps & args]
+  [& {:keys [sym expr wgsl kind ctor deps args]}]
   (let [uuid (gpu-id (str *ns*) (name sym))
-        hash (gpu-hash sym args) ; TODO diff hash for reload vs identity?
-        name (and wgsl? (gpu-name sym))
+        hash (gpu-hash args)
+        name (and wgsl (gpu-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
-               wgsl? (vary-meta assoc ::name name))]
+               wgsl (vary-meta assoc ::name name)
+               expr (vary-meta expr))]
     `(do (def ~sym
            (~ctor ~uuid ~hash
-            ~@(when wgsl? [name])
+            ~@(when wgsl [name])
             ~@(cond (nil?   deps) nil
                     (empty? deps) ['bllm.util/empty-array]
                     :else         [`(cljs.core/array ~@deps)])
-            ~@(map (partial util/keyword->enum enum-ns) args)))
+            ~@args))
          (bllm.wgsl/register ~sym))))
 
 (defn- node-kind [sym]
@@ -156,15 +157,20 @@
              ~gmeta (meta ~ginit)
              ~node  (if-not ~gmeta ~node (vary-meta ~node merge ~gmeta))]
          ;; Finally, generate the node on the ClojureScript side of things.
-         (emit-node ~(:wgsl attrs true) util/ns-wgsl ~node ~kind
-                    '~(util/keyword->wgsl kind)
-                    ~(when (has-deps? (util/sym kind))
-                       `(:deps ~gmeta []))
-                    ~@props
-                    ~@(when (not-empty body)
-                        (if-let [ks (:keys attrs)]
-                          (for [k ks] `(get ~ginit ~k))
-                          [ginit])))))))
+         (emit-node
+          :sym  ~node
+          :expr ~(:expr attrs)
+          :wgsl ~(:wgsl attrs true)
+          :kind ~kind
+          :ctor '~(util/keyword->wgsl kind)
+          :deps ~(when (has-deps? (util/sym kind))
+                  `(:deps ~gmeta []))
+          :args (map util/keyword->wgsl
+                     [~@props
+                      ~@(when (not-empty body)
+                          (if-let [ks (:keys attrs)]
+                            (for [k ks] `(get ~ginit ~k))
+                            [ginit]))]))))))
 
 (defn- emit-obj [sym emit? keys vals]
   `(cljs.core/js-obj
@@ -290,14 +296,17 @@
   (let [kind  (node-kind sym)
         k-sym (util/sym kind)
         props (state-props k-sym)
-        names (map first props)]
-    `(defm ~sym [~'name & {:keys [~@names]}]
-       (emit-node false util/ns-gpu ~'name ~kind
-                  '~(util/keyword->wgsl kind)
-                  ~(when (has-deps? k-sym)
-                     `(->> (filter some? [~@deps])
-                           (map (comp ::uuid #(ana/resolve-existing-var ~'&env %)))))
-                  ~@names))))
+        names (mapv first props)]
+    `(defm ~sym [~'name & {:keys ~names}]
+       (emit-node
+        :wgsl false
+        :sym  ~'name
+        :kind ~kind
+        :ctor '~(util/keyword->wgsl kind)
+        :deps ~(when (has-deps? k-sym)
+                 `(->> (filter some? [~@deps])
+                       (map (comp ::uuid #(ana/resolve-existing-var ~'&env %)))))
+        :args (map util/keyword->gpu ~names)))))
 
 (defstate defprimitive
   "Describes how a pipeline constructs and rasterizes primitives from its vertices.")
@@ -318,17 +327,51 @@
   color alpha)
 
 
-;;; Render I/O - Vertex attributes, interpolants, fragment draw targets
+;;; I/O - Builtin vars, vertex attributes, interpolants, fragment draw targets
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- io-expr [prefix-fn m]
+  (assoc m ::expr (str \_ (prefix-fn m) \. (::name m))))
+
+(defn- builtin-io [dir in out]
+  (case dir
+    :in  in
+    :out out
+    (throw (ex-info "Unexpected builtin direction" {:dir dir}))))
+
+(defn- builtin-prefix [m]
+  (let [dir (::dir m)]
+    (case (::stage m)
+      :vertex   (builtin-io dir "in" "io")
+      :fragment (builtin-io dir "io" "out")
+      :compute  (do (when (not= :in dir)
+                      (throw (ex-info "Invalid compute builtin" m)))
+                    "in"))))
+
+(defnode defbuiltin
+  {:keys [:name :stage :dir :type] :props false :wgsl false
+   :expr (partial io-expr builtin-prefix)}
+  [sym stage dir type & {:as opts}]
+  (let [ident (or (:name opts) (util/kebab->snake sym))]
+    (with-meta {:name  ident
+                :stage (util/keyword->gpu  stage "stage-")
+                :type  (util/keyword->wgsl type)
+                :dir   (builtin-io dir true false)}
+      {::name  ident
+       ::type  type
+       ::stage stage
+       ::dir   dir})))
 
 (defm defio
   "Render I/O nodes have a `bind` slot and a `type`."
-  [node]
-  `(defnode ~node ~'[sym bind type]))
+  [node prefix]
+  `(defnode ~node
+     {:expr (partial io-expr (constantly ~prefix))}
+     ~'[sym bind type]))
 
-(defio defvertex-attr "Defines an input to the vertex stage.")
-(defio defdraw-target "Defines an output from the fragment stage.")
-(defio definterpolant "Defines an I/O channel between render stages.")
+(defio defvertex-attr "Defines an input to the vertex stage."         "in")
+(defio defdraw-target "Defines an output from the fragment stage."    "out")
+(defio definterpolant "Defines an I/O channel between render stages." "io")
 
 
 ;;; Resources - Buffer Views, Texture Views & Samplers
@@ -454,19 +497,21 @@
             node {:op    :binding
                   :name  k
                   :init  (parse ctx env v)
-                  ::name (util/kebab->camel
+                  ::expr (util/kebab->camel
                           (if-not (contains? env k)
                             k ; Unshadowed ident
-                            (gensym (name k))))}]
+                            (gensym (str (name k) \_))))}]
         (recur (assoc env k node)
                (conj out node)
                (next pairs))))))
 
 (defmethod parse* 'if [ctx env _ [cond then else]]
-  {:op   :if
-   :cond (parse ctx env cond)
-   :then (parse ctx env then)
-   :else (parse ctx env else)})
+  (if (or (true? cond) (keyword? cond))
+    (parse ctx env then)
+    {:op   :if
+     :cond (parse ctx env cond)
+     :then (parse ctx env then)
+     :else (parse ctx env else)}))
 
 (defn- resolve-var [ctx sym]
   (when-let [v (ana/resolve-existing-var (:cljs-env ctx) sym)]
@@ -477,7 +522,7 @@
 (defn- get-expand [s]
   (if (re-find #"^[0-9]+$" s)
     {:op :nth :elem (Integer/parseInt s)}
-    {:op :field :name s ::name (util/kebab->camel s)}))
+    {:op :field :name s ::expr (util/kebab->camel s)}))
 
 (defn- sym-expand [sym]
   (if-not (str/index-of (name sym) \.)
@@ -521,12 +566,13 @@
         {:op :field
          :in (parse cljs env (first args))
          :name sym
-         ::name (util/kebab->camel sym)}))))
+         ::expr (util/kebab->camel sym)}))))
 
 (defn- parse-lit [cljs env form]
   {:op :lit
    :value form
    :tag (cond
+          (boolean? form) :b
           (double?  form) :f
           (integer? form) :i
           :else (throw (ex-info "Unexpected literal type" {:type (type form)
@@ -569,10 +615,10 @@
      (semicolon))))
 
 (defn- pr-name [node]
-  (print (::name node)))
+  (print (::expr node)))
 
-(defn- pr-name->camel [node]
-  (print (or (::name node) (util/kebab->camel (:name node)))))
+(defmethod gen* :binding [node]
+  (pr-name node))
 
 (defmethod gen* :local [node]
   (pr-name node))
@@ -580,11 +626,9 @@
 (defmethod gen* :wgsl [node]
   (pr-name node))
 
-(defmethod gen* :binding [node]
-  (pr-name->camel node))
-
 (defmethod gen* :var [node]
-  (pr-name->camel node))
+  (print (or (::expr node) (::name node)
+             (throw (ex-info "Expecting expr or name" node)))))
 
 (defmethod gen* :nth [{:keys [elem in]}]
   (gen* in)
@@ -609,7 +653,7 @@
       (indent)
       (if (= *return* :ret)
         (print "return ")
-        (some-> *return* ::name (print "= "))))
+        (some-> *return* ::expr (print "= "))))
     (binding [*return* (and block *return*)]
       (gen* node))
     (semicolon node)))
@@ -644,9 +688,10 @@
   (when else
     (indent)
     (print "else")
-    (if (= :if (:op else))
-      (gen* else)
-      (gen-clause else))))
+    (if (not= :if (:op else))
+      (gen-clause else)
+      (do (print \space)
+          (gen* else)))))
 
 (defmethod gen* :let [{:keys [bind body]}]
   (doseq [{:keys [name init] :as node} bind
@@ -670,6 +715,8 @@
             (print " = ")
             (gen* init))
           (semicolon))))
+  (when (block-node? (first body))
+    (indent))
   (gen-block body))
 
 (defmethod gen* :call [{:keys [fn xs]}]
@@ -719,6 +766,8 @@
         code (for [expr body]
                (parse cljs env expr))
         wgsl (binding [*indent* 1]
+               ;; TODO refactor code before gen, WGSL more restrictive than CLJS
+               ;; - lift blocks outside expressions, introduce temporary locals
                (gen code))]
     (link-fn deps code wgsl))) ; TODO code -> sourcemap
 
@@ -749,7 +798,7 @@
 
 (defn- argument [id [sym tag]]
   {:name sym
-   ::name (util/kebab->camel sym)
+   ::expr (util/kebab->camel sym)
    :binding-form? true
    :op :binding
    :env {:context :expr}
@@ -777,10 +826,31 @@
                        :args `(cljs.core/array
                                ~@(for [arg args]
                                    `(bllm.wgsl/argument
-                                     ~(::name arg)
+                                     ~(::expr arg)
                                      ~(util/keyword->wgsl (:tag arg)))))}))
          (compile-fn env (if ret (next body) body))
          (binding [*return* :ret]))))
+
+(defn- select-node [deps pred]
+  (->> deps
+       (filter pred)
+       (map ::uuid)
+       (into #{})))
+
+(defn- match-builtin [node kind stage dir]
+  (and (= :builtin kind)
+       (= (::stage node) stage)
+       (= (::dir   node) dir)))
+
+(defn- select-kind [deps kind stage dir]
+  (select-node deps #(let [k (::kind %)]
+                       (or (= kind k)
+                           (match-builtin % k stage dir)))))
+
+(defn- gen-io [ids]
+  (if (empty? ids)
+    `(bllm.wgsl/empty-io)
+    `(bllm.wgsl/gen-io ~(hash ids) (bllm.util/array ~@ids))))
 
 (defnode defkernel
   "Defines a compute shader entry point.
@@ -790,48 +860,42 @@
   which user-defined parameters can then be accessed through bound resources.
 
   The workgoup size must also be specified. No default value suits all cases."
-  {:keys [:x :y :z :io :wgsl] :props false}
+  {:keys [:in :x :y :z :wgsl] :props false}
   [sym [x y z] & body]
   (compile-fn &env body
               (fn link [deps code wgsl]
-                (with-deps deps {:wgsl wgsl :x x :y y :z z
-                                 :io nil}))))
+                (let [ids (select-node deps #(match-builtin % (::kind %)
+                                                            :compute :in))]
+                  (-> #(ids (::uuid %))
+                      (remove deps)
+                      (with-deps
+                        {:in (gen-io ids) :x x :y y :z z :wgsl wgsl}))))))
 
-(defn- select-node [deps kind]
-  (->> deps
-       (filter #(= kind (::kind %)))
-       (map ::uuid)
-       (into #{})))
-
-(defn- gen-io [ids]
-  (if (empty? ids)
-    `(bllm.wgsl/empty-io)
-    `(bllm.wgsl/gen-io ~(hash ids) (bllm.util/array ~@ids))))
-
-(defn- compile-io [stage env body]
+(defn- compile-io [stage in out env body]
   (compile-fn env body
               (fn link [deps code wgsl]
-                (let [ids-stage  (select-node deps stage)
-                      ids-raster (select-node deps :interpolant)]
+                (let [ids-i (select-kind deps in  stage :in)
+                      ids-o (select-kind deps out stage :out)]
                   (-> #(let [id (::uuid %)]
-                         (or (ids-stage id) (ids-raster id)))
+                         (or (ids-i id)
+                             (ids-o id)))
                       (remove deps)
                       (with-deps
                         {:wgsl  wgsl
-                         :stage (gen-io ids-stage)
-                         :io    (gen-io ids-raster)}))))))
+                         :in   (gen-io ids-i)
+                         :out  (gen-io ids-o)}))))))
 
 (defnode defvertex
   "Defines a vertex shader entry point."
-  {:keys [:stage :io :wgsl]}
+  {:keys [:in :out :wgsl]}
   [sym & body]
-  (compile-io :vertex-attr &env body))
+  (compile-io :vertex :vertex-attr :interpolant &env body))
 
 (defnode defpixel
   "Defines a fragment shader entry point."
-  {:keys [:stage :io :wgsl]}
+  {:keys [:in :out :wgsl]}
   [sym & body]
-  (compile-io :draw-buffer &env body))
+  (compile-io :fragment :interpolant :draw-target &env body))
 
 
 ;;; Resource Groups

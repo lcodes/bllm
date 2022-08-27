@@ -6,7 +6,7 @@
 (defn- emit-wgsl-def [sym]
   `(def ~(vary-meta sym assoc
                     :op :wgsl
-                    :bllm.wgsl/name (util/kebab->camel sym))))
+                    :bllm.wgsl/expr (util/kebab->camel sym))))
 
 (defm defctor [sym & args]
   (emit-wgsl-def sym))

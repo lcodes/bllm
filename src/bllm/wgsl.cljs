@@ -24,7 +24,8 @@
   Multisample
   BlendComp
   Blend
-  ;; Render I/O Definitions
+  ;; I/O Definitions
+  Builtin
   VertexAttr
   DrawTarget
   Interpolant
@@ -113,25 +114,9 @@
 (defn gpu-full-texture-type [node]
   (str (gpu-texture-type node.tex) \< (gpu-prim-type node.type) \>))
 
-(defenum builtin
-  "Special value for built-in bindings."
-  {:repr :string :reverse true}
-  vertex-index
-  instance-index
-  position
-  front-facing
-  frag-depth
-  local-invocation-id
-  local-invocation-index
-  global-invocation-id
-  workgroup-id
-  num-workgroups
-  sample-index
-  sample-mask)
-
 (defn- io-bind [slot]
   (if (neg? slot)
-    (builtin slot) ; TODO this syntax is wrong
+    ""
     slot))
 
 (defn- emit-enum [node]
@@ -173,28 +158,39 @@
     (str! wgsl ") -> " (gpu-field-type node.ret) " {\n" node.wgsl \})
     wgsl))
 
-(defn- emit-entry [stage node]
-  (util/doarray [id node.deps]
-    ;; TODO I/O, builtins
-    )
-  (str "@" stage "\nfn " node.name "(Input) -> Output {\n" node.wgsl \}))
-
 (defn- emit-kernel [node]
   (let [wgsl (str "@compute @workgroup_size(" node.x)]
     (when-let [y node.y] (str! wgsl ", " y))
     (when-let [z node.z] (str! wgsl ", " z))
-    (str! wgsl ")\nfn " node.name \( "INPUTS" ") {\n" node.wgsl \})))
+    (str! wgsl ")\nfn " node.name \()
+    (when node.in
+      (str! wgsl "in : " node.in.name))
+    (str! wgsl ") {\n" node.wgsl \})
+    wgsl))
 
-(defn- emit-vertex [node]
-  node.wgsl)
+(defn- emit-entry [stage in out node]
+  (let [wgsl (str "@" stage "\nfn " node.name \()]
+    (when node.in
+      (str! wgsl in " : " node.in.name))
+    (str! wgsl \))
+    (if-not node.out
+      (str! wgsl " {\n" node.wgsl \}) ; TODO can this even compile?
+      (str! wgsl " -> " node.out.name " {\n  var "
+            out " : " node.out.name ";\n"
+            node.wgsl "  return " out ";\n}"))
+    wgsl))
 
-(defn- emit-pixel [node]
-  node.wgsl)
+(def emit-vertex (partial emit-entry "vertex"   "_in" "_io"))
+(def emit-pixel  (partial emit-entry "fragment" "_io" "_out"))
 
 
 ;;; Stateless Node Definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- emit-builtin [node]
+  (str "@builtin(" node.name ") " node.name " : " (gpu-prim-type node.type)))
+
+(defwgsl builtin [stage dir type] emit-builtin)
 (defwgsl vertex-attr [bind type] emit-io)
 (defwgsl draw-target [bind type] emit-io)
 (defwgsl interpolant [bind type] emit-io)
@@ -246,9 +242,9 @@
 (defgpu blend-comp)
 (defgpu blend)
 
-(defwgsl kernel [x y z   io wgsl] emit-kernel) ; TODO workgroup components can be ref to override var
-(defwgsl vertex [buffers io wgsl] emit-vertex)
-(defwgsl pixel  [targets io wgsl] emit-pixel)
+(defwgsl kernel [in x y z wgsl] emit-kernel) ; TODO workgroup components can be ref to override var
+(defwgsl vertex [in out   wgsl] emit-vertex)
+(defwgsl pixel  [in out   wgsl] emit-pixel)
 ;; TODO check limits against device, mark shader usable/unusable
 ;;      - fallback mechanisms
 
@@ -295,8 +291,8 @@
   (or (.get defs id)
       (let [io #js {:kind GeneratedIO
                     :uuid id
-                    :deps (js/Array.from deps)
-                    :wgsl "TODO gen-io"}]
+                    :name (str "GenIO_" (bit-and 0xffff (abs id)))
+                    :deps (js/Array.from deps)}]
         (.set defs id io)
         io)))
 
@@ -319,6 +315,9 @@
                 (.set deps id ids)
                 ids))
           (.add node.uuid))))
+  ;; Debug
+  (js/console.log node)
+  (when node.wgsl (js/console.log node.wgsl))
   node)
 
 (defn- entry? [node]
@@ -379,17 +378,17 @@
     (check-dirty dirty-ids)
     (.clear dirty-ids))
   (when (pos? (.-size entry-ids))
-    (let [g   (to-module entry-ids)
-          s   (topo-sort g util/temp-array)
+    (let [g   (-> (to-module entry-ids)
+                  (topo-sort util/temp-array))
           lbl "Generated"
           src (str "// " lbl "\n")] ; TODO add version info, in case text is saved
-      (util/doarray [node s]
+      (util/doarray [node g]
         (str! src "\n// #wgsl " node.uuid "\n" node.wgsl "\n"))
       (let [mod (gpu/shader-module lbl src
                                    js/undefined   ; TODO source map
                                    js/undefined)] ; TODO hints
         (gpu/dump-errors mod)
         (js/console.log src)
-        (js/console.log s)
+        (js/console.log g)
         ;; TODO loop through all requests, propagate shaders to pipelines, live updates
         (.clear entry-ids)))))
