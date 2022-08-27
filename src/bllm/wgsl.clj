@@ -626,9 +626,11 @@
 
 (def ^:private block-node? (comp block? :op))
 
-(def ^:private needs-indent? (disj block? :let))
-
 (def ^:private needs-semicolon? (comp not block-node?))
+
+(def ^:private needs-indent? (comp (disj block? :let) :op))
+
+(def ^:private needs-indent-expr? (comp not #{:let :call :op-fn} :op))
 
 (defn- indent []
   (print (util/spaces *indent*)))
@@ -691,7 +693,8 @@
 (defn- gen-block [stmts]
   (binding [*return* nil] ; Statements (side-effects execution)
     (doseq [node (butlast stmts)]
-      ;(indent)
+      (when (needs-indent-expr? node)
+        (indent))
       (gen* node)
       (semicolon node)))
   (when-let [node (last stmts)] ; Terminator (control-flow evaluation)
@@ -742,6 +745,10 @@
     (dotimes [n (count cases)]
       (indent)
       (print "case ")
+      (doseq [node (interpose ", " (nth cases n))]
+        (if (string? node)
+          (print node)
+          (gen* node)))
       (with-block
         (gen-stmt (nth clauses n))))
     (indent)
@@ -772,7 +779,7 @@
             (print " = ")
             (gen* init))
           (semicolon))))
-  (when (block-node? (first body))
+  (when (needs-indent-expr? (first body))
     (indent))
   (gen-block body))
 
@@ -825,7 +832,8 @@
                (parse cljs env expr))
         wgsl (binding [*indent* 1]
                ;; TODO refactor code before gen, WGSL more restrictive than CLJS
-               ;; - lift blocks outside expressions, introduce temporary locals
+               ;; - lift stmts outside expressions, introduce temporary locals
+               ;; - remove pure expressions from nonterminal stmts (do 1 2 3) -> 3
                (gen code))]
     (link-fn deps code wgsl))) ; TODO code -> sourcemap
 
@@ -865,6 +873,8 @@
    :tag tag
    :local :arg})
 
+;; TODO gensyms cause different hashes on every execution
+;; - generate hash from user inputs, not compiler outputs
 (defnode defun
   {:props false :kind :function
    :keys [:ret :args :wgsl]
