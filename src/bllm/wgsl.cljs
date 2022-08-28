@@ -164,7 +164,7 @@
     (when-let [z node.z] (str! wgsl ", " z))
     (str! wgsl ")\nfn " node.name \()
     (when node.in
-      (str! wgsl "in : " node.in.name))
+      (str! wgsl "_in : " node.in.name))
     (str! wgsl ") {\n" node.wgsl \})
     wgsl))
 
@@ -373,6 +373,14 @@
       (topo-sort* out marks g node))
     out))
 
+(defn- collect-io [^js/Map g ^js/Set io]
+  (.clear io)
+  (util/domap [node _ g]
+    (when (entry? node)
+      (some->> node.in  (.add io))
+      (some->> node.out (.add io))))
+  io)
+
 (defn tick []
   (when (pos? (.-size dirty-ids))
     (check-dirty dirty-ids)
@@ -382,6 +390,12 @@
                   (topo-sort util/temp-array))
           lbl "Generated"
           src (str "// " lbl "\n")] ; TODO add version info, in case text is saved
+      (util/docoll [io (collect-io g util/temp-set)]
+        (str! src "\n// @wgsl " io.uuid "\nstruct " io.name " {\n")
+        (util/doarray [id io.deps]
+          (let [elem (.get defs id)]
+            (str! src "  " elem.wgsl ",\n")))
+        (str! src "}\n"))
       (util/doarray [node g]
         (str! src "\n// #wgsl " node.uuid "\n" node.wgsl "\n"))
       (let [mod (gpu/shader-module lbl src

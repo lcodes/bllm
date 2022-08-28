@@ -383,6 +383,7 @@
   [sym & fields]
   (emit-struct &env sym (meta/parse-struct &env fields)))
 
+;; TODO separate struct from instance identifiers (same namespace in WGSL -> compile errors)
 (defnode defuniform
   [sym group bind & fields]
   (emit-struct &env sym (meta/parse-struct &env fields)))
@@ -457,11 +458,17 @@
          (infix-expand '(1 * 2))
          (infix-expand '(place = 1 * expr + (2 * 3))))
 
+(def macro-expand-ignore
+  "Don't `macro-expand` forms expanding into calls to `js*`."
+  '#{/})
+
 (defn- macro-expand [env expr]
-  (let [expr' (ana/macroexpand-1 env expr)]
-    (if (= expr expr')
-      expr
-      (macro-expand env expr'))))
+  (if (and (seq? expr) (macro-expand-ignore (first expr)))
+    expr
+    (let [expr' (ana/macroexpand-1 env expr)]
+      (if (= expr expr')
+        expr
+        (macro-expand env expr')))))
 
 
 ;;; WGSL Analyzer - Interpret a subset of Clojure into shader AST nodes
@@ -631,7 +638,7 @@
 
 (def ^:private needs-indent? (comp (disj block? :let) :op))
 
-(def ^:private needs-indent-expr? (comp not #{:let :call :op-fn} :op))
+(def ^:private needs-indent-expr? (comp not #{:let} :op))
 
 (defn- indent []
   (print (util/spaces *indent*)))
@@ -780,7 +787,7 @@
             (print " = ")
             (gen* init))
           (semicolon))))
-  (when (needs-indent-expr? (first body))
+  (when (needs-indent? (first body))
     (indent))
   (gen-block body))
 

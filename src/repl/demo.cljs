@@ -79,8 +79,8 @@
     101 (* x 5)
     x))
 
-(wgsl/defun block-test :u32 []
-  (do 1 2 3))
+(wgsl/defun block-test :u32 [x :u32]
+  (do 1 (= x 12) 3))
 
 (wgsl/defun nested-let :i32 []
   (let [x (let [y (let [z 12]
@@ -294,10 +294,13 @@
         albedo&specular (texture-load gbuffer-albedo io-texcoord 0)] ; TODO texcoord from invocation
     ;; TODO use specular
     (data.albedo = albedo&specular.rgb))
-  #_(let [depth ()]))
+  #_(let [depth ()])
+  (lighting data)
+  )
 
 (wgsl/defuniform pp
   EFFECT 0
+  [scatter  :f32]
   [gamma    :f32]
   [exposure :f32]
   [dist1    :vec4]
@@ -319,6 +322,26 @@
 (wgsl/defun tonemap:uncharted-2 [x :vec2]
   )
 
+;; TODO will need some way of organizing binding numbers
+;;  - declare group & bindings at once? at least removes group & bind args
+;;  - are resource bindings ever reused across groups?
+(comment ;; want something like this
+  (wgsl/defstorage reusable 2 0)
+  (wgsl/defgroup effect-grp 2
+    reusable
+    (wgsl/deftexture screen-tex :tex-2d) ; bound to (reusable.bind + 1)
+    (wgsl/defuniform screen ; bound to (screen-tex.bind + 1)
+      [params :vec4]))
+  (wgsl/deflayout l
+    ;; groups 0 & 1 are null, because effect-grp starts at 2
+    effect-grp
+    (wgsl/defgroup inline-grp ; bound to (effect-grp.bind + 1)
+      (wgsl/defsampler layout-specific-sampler)))
+  )
+;;
+
+(wgsl/deftexture screen-tex  EFFECT 0 :tex-2d :f32)
+(wgsl/deftexture input-tex   EFFECT 0 :tex-2d :f32)
 (wgsl/deftexture bloom-tex   EFFECT 1 :tex-2d :f32)
 (wgsl/deftexture grain-tex   EFFECT 2 :tex-2d :f32)
 (wgsl/deftexture grading-lut EFFECT 3 :tex-3d :f32)
@@ -359,16 +382,17 @@
     (texture-load grading-lut x 0)
     (srgb->linear x)))
 
-#_
+
 (wgsl/defun ^:feature chromatic-aberration [uv :vec2]
-  {:off (screen-color uv)
-   :on  (let [coord (2 * uv - 1)
-              end   (uv - coord * (dot coord coord) * pp.chroma)
-              delta ((end - uv) / 3)
-              x (texture screen-tex uv)
-              y (texture screen-tex (distort-uv (uv + delta)))
-              z (texture screen-tex (distort-uv (uv + delta * 2)))]
-          (vec3 x.r y.g z.b))})
+  #_{:off (screen-color uv)
+   :on _}
+  (let [coord (2 * uv - 1)
+        end   (uv - coord * (dot coord coord) * pp.chroma)
+        delta ((end - uv) / 3)
+        x (texture-load screen-tex uv)
+        y (texture-load screen-tex (distort-uv (uv + delta)))
+        z (texture-load screen-tex (distort-uv (uv + delta * 2)))]
+    (vec3 x.r y.g z.b)))
 
 (wgsl/defun ^:feature grain [c :vec3 uv :vec2]
   (let [intensity pp.grain.x
@@ -379,9 +403,8 @@
     (c + c * g * intensity * l)))
 
 (wgsl/defkernel post-process [8 8]
-  (let [xy (vec2) ; TODO global invocation id
-        uv (distort-uv xy)]
-    (-> (vec3) #_(chromatic-aberration uv)
+  (let [uv (distort-uv global-invocation-id.xy)]
+    (-> (chromatic-aberration uv)
         (bloom uv)
         (tonemap)
         (vignette uv)
@@ -394,20 +417,69 @@
 (wgsl/defkernel bloom-prefilter [8 8]
   )
 
+;; WGSL doesnt allow user-defined const functions
+;;
+;; two approaches
+;; - change to the WGSL pipeline: fully move codegen from clj to cljs
+;; - emit packed AST, single byte array, "interpret" in js to generate wgsl
+;; - emit defunc as simple `defn` (ast -> unpack -> expand defuncs -> compile -> module -> link)
+;;
+;; or, much simpler for now; but changes the implementation runtime of macros
+;; - defunc runs in clojure, not clojurescript (really java instead of javascript)
+;; - same issues as `macrolet` -> each definition starts with only the prelude
+;; - later changing to other approach means refactoring existing defuncs
+;; - generates more WGSL text directly in the output javascript; doesnt matter for now -> gzip it back
+;; - on the other hand; can always check if a matching clojure namespace exists, and use that as a starting env to eval defunc in
+(comment (wgsl/defunc my-macro [gpu unexpanded forms !]
+           &env ; -> usual macroexpand environment, augmented with WGSL state
+           (do ; full clojure here -> arguments can be symbols, keywords, maps, vectors, etc
+             `(1 + 2)))) ; "wgsl" code emitted
+
+(wgsl/deftexture cell-out MODEL 0 :tex-2d :f32)
+
 (wgsl/defkernel blur-h [8 8]
   )
 
 (wgsl/defkernel blur-v [8 8]
-  )
+  ;; this is cool, but not elegant; and defmacro is either in another file or a cljc one
+  ;; need a `wgsl/defunc` to solve this -> just need to implement `constexpr` functions
+  (clojure.tools.macro/macrolet
+      [(sample [uv sign y]
+         `(~'texture-sample screen-tex (~uv ~sign (~'vec2 0 ~y))))]
+    ;; just want to write coefficient literals and specify the filter's schema
+    ;; - generate *everything* else (spec macro : schema -> implementation)
+    ;; - use composable language we all understand -> just expose the mental model
+    ;; - yields the very code which would be hand-crafted; every step is pure & independently tested
+    ;;   - readability & simplicity more important -> communicates intent
+    ;;   - "show me your flowchart and conceal your tables" -> give me your domain specs and conceal your implementations
+    (let [sz (->> (texture-dimensions screen-tex 0) .y f32 (/ 1))
+          uv global-invocation-id.xy
+          c0 (sample uv - 3.23076923)
+          c1 (sample uv - 1.38461538)
+          c2 (texture-sample screen-tex uv)
+          c3 (sample uv + 1.38461538)
+          c4 (sample uv + 3.23076923)
+          c  (+ (c0.rgb * 0.07027027)
+                (c1.rgb * 0.31621622)
+                (c2.rgb * 0.22702703)
+                (c3.rgb * 0.31621622)
+                (c4.rgb * 0.07027027))]
+      (texture-store cell-out uv c))))
 
-#_
-(wgsl/defkernel upsample [xy 8 8]
-  (let [hi (texture screen-tex   xy)
-        lo (texture upsample-tex xy)] ; TODO generic storage input
-    (texture-store out-color xy (vec4 (mix hi.rgb lo.rgb pp.scatter) 1))))
+(wgsl/defkernel upsample [8 8]
+  (let [uv global-invocation-id.xy
+        hi (texture-load screen-tex uv 0)
+        lo (texture-load input-tex  uv 0)]
+    (texture-store cell-out uv (vec4 (mix hi.rgb lo.rgb pp.scatter) 1))))
+
 
 (comment
-  (wgsl/compile lighting-cs)
+  (do
+    (wgsl/compile lighting-cs)
+    (wgsl/compile upsample)
+    (wgsl/compile blur-v)
+    (wgsl/compile post-process)
+    )
 
 (js/console.log screen-pos.wgsl)
 (js/console.log rgb->hsv.wgsl)
