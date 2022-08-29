@@ -11,7 +11,7 @@
 
   And some caveats:
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
-  (:require-macros [bllm.gpu :refer [defgpu defstage]])
+  (:require-macros [bllm.gpu :refer [defentry defgpu defstage]])
   (:require [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
 
@@ -42,6 +42,7 @@
   nil)
 
 (defn- init-resources []
+  ;; TODO will contain bind group layouts, shader pipelines, textures, buffers,
   )
 
 (defn- try-init-resource [res]
@@ -407,8 +408,37 @@
   [compare       ::compare-function]
   [maxAnisotropy ::u16 1])
 
+(defentry buffer-binding-layout
+  [type             ::buffer-binding-type "uniform"]
+  [hasDynamicOffset :bool false]
+  [minBindingSize   :u64  0])
+
+(defentry sampler-binding-layout
+  [type ::sampler-binding-type "filtering"])
+
+(defentry texture-binding-layout
+  [sampleType    ::texture-sample-type "float"]
+  [viewDimension ::texture-view-dimension "2d"]
+  [multisampled  :bool false])
+
+(defentry storage-texture-binding-layout
+  [access        ::storage-texture-access "write-only"]
+  [format        ::texture-format]
+  [viewDimension ::texture-view-dimesion "2d"])
+
+(defentry external-texture-binding-layout)
+
 (defgpu bind-group-layout
   [entries (:array ::bind-group-layout-entry)])
+
+(defentry bind-group-entry
+  [binding  :i32]
+  [resource ::binding-resource])
+
+(defentry buffer-binding
+  [buffer ::buffer]
+  [offset :u64 0]
+  [size   :u64 0])
 
 (defgpu bind-group
   [layout ::bind-group-layout]
@@ -491,8 +521,46 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-;;; Resource Binding
+;;; Resource Bindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^:private bind-entries #js [])
+
+
+(defn bind [group index visibility]
+  ;; - bind index
+  ;; - stage visibility
+
+  ;; reusable descriptors, different types:
+  ;;   buffer : uniform, storage, read-only-storage
+  ;;   - hasDynamicOffset, minBindingSize (IMPORTANT)
+  ;;   sampler : filtering, non-filtering, comparison
+  ;;   texture : float, unfilterable-float, depth, sint, uint
+  ;;   - viewDimension, multisampled
+  ;;   storage : write-only
+  ;;   - format, viewDimension
+  ;;   external : ??
+
+
+  )
+
+;; Flow:
+;; (defuniform)
+;; (deftexture)
+;; (defsampler)
+;; (defgroup)
+;; (defgroup (deftexture))
+;; (deflayout)
+;; (defvertex)
+;; (defpixel)
+;; (defcompute)
+;; (defrender)
+;; (defcompute)
+;;
+;; node.gpu -> for group, layout, entry, pipeline
+;; - cant be gpu/defres directly, not a def
+;; - just emit call to underlying gpu/reg-resource -> same result
+;; - will need to destroy gpu objects when recreating nodes, if different
 
 
 ;;; Shader Modules

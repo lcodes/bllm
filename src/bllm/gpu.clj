@@ -9,6 +9,17 @@
 (defn- descriptor-symbol [s]
   (symbol (str s "-desc")))
 
+(defn- emit-object [fields]
+  `(cljs.core/js-obj
+    ~@(flatten
+       (for [[param tag & [default]] fields]
+         ;; TODO help JS runtime, use default value of type tag
+         [(str param) (if (some? default) default 'js/undefined)]))))
+
+(defn- emit-setters [desc-sym arg-syms]
+  (for [arg arg-syms]
+    `(set! (. ~desc-sym ~(symbol (str \- arg))) ~arg)))
+
 (defn- emit-descriptor
   "Generates a reusable descriptor and a function to populate it."
   [create? ctor-name param-specs desc-sym desc-tag-fn & extra-fields]
@@ -21,15 +32,10 @@
     (util/wrap-do
      ;; Emit a reusable descriptor `js/Object`. Only used by the next fn.
      `(def ~(with-meta desc-sym {:tag desc-tag :private true})
-        (cljs.core/js-obj
-         ~@(flatten
-            (for [[param tag & [default]] fields]
-              ;; TODO help JS runtime, use default value of type tag
-              [(str param) (if (some? default) default 'js/undefined)]))))
+        ~(emit-object fields))
      ;; Emit a function to fill the descriptor and create a `gpu/Object`.
      `(defn ~ctor-name ~arg-syms
-        ~@(for [arg arg-syms]
-            `(set! (. ~desc-sym ~(symbol (str \- arg))) ~arg))
+        ~@(emit-setters desc-sym arg-syms)
         ~(if-not create?
            'js/undefined
            `(. ~'device ~create ~desc-sym))))))
@@ -53,6 +59,22 @@
                       '[entryPoint :string])
      ;; Connect the stage descriptor to the pipeline descriptor. Once.
      `(set! (. ~pipeline-desc ~(symbol (str \- ctor-name))) ~desc-sym))))
+
+(defm ^:private defentry
+  [sym & param-specs]
+  (let [tmp  (gensym "desc")
+        tag  (symbol "js" (str "GPU" (util/kebab->pascal sym)))
+        desc (descriptor-symbol sym)
+        syms (map first param-specs)]
+    `(do (def ~(with-meta desc {:private true :tag tag})
+           (cljs.core/array))
+         (defn ~sym [~'index ~@syms]
+           (let [~tmp (or (aget ~desc ~'index)
+                          (let [tmp# ~(emit-object param-specs)]
+                            (aset ~desc ~'index tmp#)
+                            tmp#))]
+             ~@(emit-setters tmp syms)
+             ~tmp)))))
 
 (comment
   (clojure.pprint/pprint
