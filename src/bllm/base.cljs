@@ -11,13 +11,14 @@
 (defctor f32 []) ; really a cast
 
 ;; TODO infer vec2<f32> from (vec2 (f32 expr) (f32 expr)) or (vec2 (vec2<f32> expr))
-(defctor vec2 [])
-(defctor vec3 [])
-(defctor vec4 [])
+;; TODO replace hardcoded expr with type inference -> value in single generic `vec4` over `vec4`+`uvec4`+`ivec4`+...
+(defctor vec2 {:bllm.wgsl/expr "vec2<f32>"} [])
+(defctor vec3 {:bllm.wgsl/expr "vec3<f32>"} [])
+(defctor vec4 {:bllm.wgsl/expr "vec4<f32>"} [])
 
-(defctor mat2 [])
-(defctor mat3 [])
-(defctor mat4 [])
+(defctor mat2 {:bllm.wgsl/expr "mat2<f32>"} [])
+(defctor mat3 {:bllm.wgsl/expr "mat3<f32>"} [])
+(defctor mat4 {:bllm.wgsl/expr "mat4<f32>"} [])
 
 (defctor mat2x3 [])
 (defctor mat2x4 [])

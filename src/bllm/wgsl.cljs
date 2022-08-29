@@ -142,8 +142,8 @@
 (defn- emit-var [node address-space type-fn]
   (emit-bind node address-space (type-fn node)))
 
-(defn- emit-struct [node]
-  (let [wgsl (str "struct " node.name " {\n")]
+(defn- emit-struct [node type-suffix]
+  (let [wgsl (str "struct " node.name type-suffix " {\n")]
     (util/doarray [f node.info]
       (str! wgsl "  " f.name " : " (gpu-field-type f.type) ",\n"))
     (str! wgsl "}")
@@ -195,9 +195,12 @@
 (defwgsl draw-target [bind type] emit-io)
 (defwgsl interpolant [bind type] emit-io)
 
+(defn- uniform-type [t]
+  (str (gpu-type t) "_t"))
+
 (defwgsl uniform [group bind info]
-  emit-struct ; TODO support primitive uniforms?
-  (emit-var "<uniform>" gpu-type))
+  (emit-struct "_t") ; TODO support primitive uniforms?
+  (emit-var "<uniform>" uniform-type))
 
 (defwgsl storage [group bind type access]
   (emit-var (storage-address-space access) gpu-type))
@@ -208,7 +211,7 @@
 (defwgsl sampler [group bind]
   (emit-bind "" "sampler"))
 
-(defwgsl struct [info] emit-struct)
+(defwgsl struct [info] (emit-struct ""))
 
 ;; TODO promote fields to first-class defwgsl. (see comment on `argument`)
 (defn field [name type offset]
@@ -394,7 +397,7 @@
         (str! src "\n// @wgsl " io.uuid "\nstruct " io.name " {\n")
         (util/doarray [id io.deps]
           (let [elem (.get defs id)]
-            (str! src "  " elem.wgsl ",\n")))
+            (str! src "  " elem.wgsl ", // #wgsl " elem.uuid "\n")))
         (str! src "}\n"))
       (util/doarray [node g]
         (str! src "\n// #wgsl " node.uuid "\n" node.wgsl "\n"))

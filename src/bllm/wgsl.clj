@@ -807,7 +807,7 @@
                 (print \space)
                 (gen* (second xs)))
           (do (gen* (first xs)) ; Lispy; (* operand operand operand ...)
-              (loop [[x & xs] xs]
+              (loop [[x & xs] (next xs)]
                 (print \space)
                 (print fname)
                 (print \space)
@@ -828,21 +828,19 @@
 
     (throw (ex-info "Unexpected function value" {:func fn}))))
 
-(defn- gen [body]
-  (with-out-str
-    (gen-block body)))
-
 (defn- compile-fn [cljs-env body link-fn]
   (let [deps (java.util.HashSet.)
         cljs (->ParseCtx cljs-env deps)
-        env  (base-env) ; TODO remember env between macros expansions? detect changes from macros in bllm.base
+        env  (merge (base-env) ; TODO remember env between macros expansions? detect changes from macros in bllm.base
+                    (:locals cljs-env)) ; TODO warn when locals shadow base-env?
         code (for [expr body]
                (parse cljs env expr))
         wgsl (binding [*indent* 1]
                ;; TODO refactor code before gen, WGSL more restrictive than CLJS
                ;; - lift stmts outside expressions, introduce temporary locals
                ;; - remove pure expressions from nonterminal stmts (do 1 2 3) -> 3
-               (gen code))]
+               (with-out-str
+                 (gen-block code)))]
     (link-fn deps code wgsl))) ; TODO code -> sourcemap
 
 
