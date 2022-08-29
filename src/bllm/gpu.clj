@@ -4,44 +4,47 @@
             [clojure.tools.macro :as macro]
             [bllm.util           :as util :refer [defm]]))
 
-;; TODO use the individual param type tags!
+(defn- set-field
+  ([[sym tag]]
+   (set-field sym tag))
+  ([sym tag]
+   (if-not (symbol? tag)
+     sym
+     (list tag sym))))
 
-(defn- name->tag-str [suffix sym]
-  (str "GPU" (util/kebab->pascal sym) suffix))
-
-(defn- name->tag [suffix sym]
-  (symbol "js" (name->tag-str suffix sym)))
-
-(defn- descriptor-symbol [s]
-  (symbol (str s "-desc")))
-
-(defn- emit-setters [desc-sym arg-syms]
-  (for [arg arg-syms]
-    `(set! (. ~desc-sym ~(symbol (str \- arg))) ~arg)))
+(defn- emit-setters [desc-sym fields]
+  (for [[arg tag] fields]
+    `(set! (. ~desc-sym ~(util/field-name arg)) ~(set-field arg tag))))
 
 (defn- emit-descriptor
   "Generates a reusable descriptor and a function to populate it."
   [create? ctor-name param-specs desc-sym desc-tag-fn & extra-fields]
-  (let [ident    (util/kebab->pascal ctor-name)
-        attrs    (meta ctor-name)
-        fields   (concat extra-fields param-specs)
-        create   (symbol (str (:create attrs "create") ident))
-        arg-syms (mapv first (remove #(:static (meta %)) fields))
-        desc-tag (symbol "js" (desc-tag-fn ident))]
+  (let [ident  (util/kebab->pascal ctor-name)
+        attrs  (meta ctor-name)
+        fields (concat extra-fields param-specs)
+        create (symbol (str (:create attrs "create") ident))]
     (util/wrap-do
      ;; Emit a reusable descriptor `js/Object`. Only used by the next fn.
-     `(def ~(with-meta desc-sym {:tag desc-tag :private true})
+     `(def ~(with-meta desc-sym
+              {:private true :tag (util/js-sym (desc-tag-fn ident))})
         (cljs.core/js-obj
          ~@(flatten
             (for [[param tag & [default]] fields]
-              ;; TODO help JS runtime, use default value of type tag
-              [(str param) (if (some? default) default 'js/undefined)]))))
+              [(str param) (if (some? default)
+                             (set-field default tag)
+                             'js/undefined)]))))
      ;; Emit a function to fill the descriptor and create a `gpu/Object`.
-     `(defn ~ctor-name ~arg-syms
-        ~@(emit-setters desc-sym arg-syms)
+     `(defn ~ctor-name ~(mapv first (remove (comp :static meta) fields))
+        ~@(emit-setters desc-sym fields)
         ~(if-not create?
            'js/undefined
            `(. ~'device ~create ~desc-sym))))))
+
+(defn- name->tag-str [suffix sym]
+  (str "GPU" (util/kebab->pascal sym) suffix))
+
+(defn- descriptor-symbol [s]
+  (symbol (str s "-desc")))
 
 (defm ^:private defgpu
   "Generates a constructor function for the specified WebGPU object type."
@@ -65,10 +68,10 @@
 
 (defn- emit-object [fields]
   `(cljs.core/js-obj
-    ~@(interleave (map name fields) fields)))
+    ~@(interleave (map (comp name first) fields) (map set-field fields))))
 
 (defn- emit-bind [sym tag args set ctor]
-  (let [desc (symbol (str sym "-entries"))
+  (let [desc (symbol (str sym "-array"))
         tmp  (gensym "entry")
         idx  (first args)]
     `(do (def ~(with-meta desc {:private true})
@@ -83,31 +86,35 @@
 
 (defm ^:private defbind
   [sym & param-specs]
-  (let [args (mapv first param-specs)]
-    (emit-bind sym (name->tag sym "") args
-               #(emit-setters % (next args))
-               #(emit-object args))))
+  (let [index? (:index (meta sym))
+        fields (cond->> param-specs
+                 index? (concat '[[binding :i32]]))]
+    (emit-bind sym
+               (util/js-sym (name->tag-str "" sym))
+               (mapv first fields)
+               #(emit-setters % (next fields))
+               #(emit-object ((if index? next identity) param-specs)))))
 
 #_(name->tag sym "Layout")
 
 (defm ^:private defbind-layout
   [sym & param-specs]
-  (let [extra '[binding visibility]
-        wrap (map first param-specs)
-        args (vec (concat extra wrap))
+  (let [extra '[[binding    :i32]
+                [visibility :u32]]
+        fields (concat extra param-specs)
         bind (-> (name sym)
-                 (str/replace "-binding" "")
+                 (str/replace "bind-" "")
                  (util/kebab->camel))
         prop (util/field-name bind)
         bsym (symbol bind)]
-    (emit-bind sym 'js/GPUBindGroupLayoutEntry args
-               (fn [tmp]
+    (emit-bind sym 'js/GPUBindGroupLayoutEntry (mapv first fields)
+               (fn set [tmp]
                  [`(let [~bsym (. ~tmp ~prop)]
                      ~@(emit-setters tmp (next extra))
-                     ~@(emit-setters bsym wrap))])
-               (fn []
+                     ~@(emit-setters bsym param-specs))])
+               (fn ctor []
                  `(let [tmp# ~(emit-object extra)]
-                    (set! (. tmp# ~prop) ~(emit-object wrap))
+                    (set! (. tmp# ~prop) ~(emit-object param-specs))
                     tmp#)))))
 
 (comment

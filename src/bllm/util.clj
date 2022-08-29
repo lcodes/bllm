@@ -78,6 +78,9 @@
 (defn sym [^clojure.lang.Keyword k]
   (.sym k))
 
+(defn js-sym [ident]
+  (symbol "js" ident))
+
 (defn keyword->enum
   "Converts keywords to the matching constants."
   ([ns x]

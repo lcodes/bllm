@@ -11,6 +11,7 @@
 
   And some caveats:
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
+  (:refer-clojure :exclude [float max min])
   (:require-macros [bllm.gpu :refer [defbind defbind-layout defgpu defstage]])
   (:require [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
@@ -121,129 +122,56 @@
     (prn x))
   )
 
+(defflag feature
+  {:repr :string :suffix ?}
+  bgra8unorm-storage?
+  depth-clip-control?
+  depth24unorm-stencil8?
+  depth32float-stencil8?
+  indirect-first-instance?
+  rg11b10ufloat-renderable?
+  shader-f16?
+  texture-compression-bc?
+  texture-compression-etc2?
+  texture-compression-astc?
+  timestamp-query?)
+;; TODO build bitfield of feature support by calls to
+;; (feature "detected-feature-name")
+;; - returns 0 if no matching flag, flag bit otherwise, fold over bit-or
+;; - tests then simple bit maths instead of testing strings inside a set or distinct vars
 
-;;; Object Constructors
+
+;;; Specification - Generated API mirroring the WebGPU interface definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defenum topology
-  {:repr :string}
-  point-list
-  line-list
-  line-strip
-  triangle-list
-  triangle-strip)
+(defflag buffer-usage
+  "Compile-time constants equivalent to the runtime `js/GPUBufferUsage`."
+  {:suffix -buffer}
+  map-read-buffer
+  map-write-buffer
+  copy-src-buffer
+  copy-dst-buffer
+  index-buffer
+  vertex-buffer
+  uniform-buffer
+  storage-buffer
+  indirect-buffer
+  query-resolve-buffer)
 
-(defenum front-face
-  {:repr :string}
-  ccw
-  cw)
+(defgpu buffer
+  [size             :u64]
+  [usage            ::buffer-usage]
+  [mappedAtCreation :bool false])
 
-(defenum cull-mode
-  {:repr :string}
-  none
-  front
-  back)
+(defenum map-mode
+  read
+  write)
 
-(defflag color-write
-  "Values for the write-mask of a color target state."
-  RED
-  GREEN
-  BLUE
-  ALPHA)
-
-(defconst ALL (bit-or RED GREEN BLUE ALPHA))
-
-(defenum blend-factor
-  {:repr :string :prefix blend-}
-  zero
-  one
-  src
-  src-alpha
-  dst
-  dst-alpha
-  one-minus-src
-  one-minus-src-alpha
-  one-minus-dst
-  one-minus-dst-alpha
-  src-alpha-saturated
-  constant
-  one-minus-constant)
-
-(defenum blend-op
-  {:repr :string :prefix op-}
-  op-add
-  op-subtract
-  op-reverse-subtract
-  op-min
-  op-max)
-
-(defenum compare-fn
-  "Predefined functions available to the depth/stencil tests and samplers."
-  {:repr :string :prefix fn-}
-  fn-never
-  fn-less
-  fn-equal
-  fn-less-equal
-  fn-greater
-  fn-not-equal
-  fn-greater-equal
-  fn-always)
-
-(defenum stencil-op
-  {:repr :string :prefix op-}
-  op-keep
-  op-zero
-  op-replace
-  op-invert
-  op-increment-clamp
-  op-decrement-clamp
-  op-increment-wrap
-  op-decrement-wrap)
-
-(defenum index-format
-  "Memory layout of an index element."
-  {:repr :string :prefix index-}
-  index-uint16
-  index-uint32)
-
-(defenum vertex-format
-  "Memory layout of a vertex attribute."
-  {:repr :string}
-  uint8x2
-  uint8x4
-  sint8x2
-  sint8x4
-  unorm8x2
-  unorm8x4
-  snorm8x2
-  snorm8x4
-  uint16x2
-  uint16x4
-  sint16x2
-  sint16x4
-  unorm16x2
-  unorm16x4
-  snorm16x2
-  snorm16x4
-  float16x2
-  float16x4
-  float32
-  float32x2
-  float32x3
-  float32x4
-  uint32
-  uint32x2
-  uint32x3
-  uint32x4
-  sint32
-  sint32x2
-  sint32x3
-  sint32x4)
-
-(defenum vertex-step-mode
-  {:repr :string :prefix step-}
-  step-vertex
-  step-instance)
+(defenum texture-dimension
+  {:repr :string :prefix dim-}
+  dim-1d
+  dim-2d
+  dim-3d)
 
 (defenum texture-format
   "Memory layout of a texture pixel."
@@ -346,19 +274,94 @@
   astc-12x12-unorm
   astc-12x12-unorm-srgb)
 
-(defflag buffer-usage
-  "Compile-time constants equivalent to the runtime `js/GPUBufferUsage`."
-  {:prefix usage-}
-  usage-map-read
-  usage-map-write
-  usage-copy-src
-  usage-copy-dst
-  usage-index
-  usage-vertex
-  usage-uniform
-  usage-storage
-  usage-indirect
-  usage-query-resolve)
+(defflag texture-usage
+  {:suffix -texture}
+  copy-src-texture
+  copy-dst-texture
+  texture-binding
+  storage-binding
+  render-attachment)
+
+(defgpu texture
+  [size          :ivec3]
+  [mipLevelCount :i32 1]
+  [sampleCount   :i32 1]
+  [dimension     texture-dimension dim-2d]
+  [format        texture-format]
+  [usage         ::texture-usage]
+  [viewFormats   [texture-format] util/empty-array])
+
+(defenum texture-view-dimension
+  {:repr :string :prefix view-}
+  view-1d
+  view-2d
+  view-2d-array
+  view-cube
+  view-cube-array
+  view-3d)
+
+(defenum texture-aspect
+  {:repr :string}
+  all
+  stencil-only
+  depth-only)
+
+(defgpu texture-view
+  [format          texture-format]
+  [dimension       texture-view-dimension]
+  [aspect          texture-aspect]
+  [mipLevelCount   :u32]
+  [arrayLayerCount :u32]
+  [baseMipLevel    :u32 0]
+  [baseArrayLayer  :u32 0])
+
+(defenum predefined-color-space
+  {:repr :string}
+  srgb
+  display-p3)
+
+(defgpu external-texture
+  "Creates a texture from an external video object."
+  {:create import}
+  [source     :js/HTMLVideoElement]
+  [colorSpace predefined-color-space srgb])
+
+(defenum address-mode
+  {:repr :string}
+  clamp-to-edge
+  repeat
+  mirror-repeat)
+
+(defenum filter-mode
+  {:repr :string}
+  nearest
+  linear)
+
+(def mipmap-filter-mode filter-mode)
+
+(defenum compare-function
+  "Predefined functions available to the depth/stencil tests and samplers."
+  {:repr :string}
+  never
+  less
+  equal
+  less-equal
+  greater
+  not-equal
+  greater-equal
+  always)
+
+(defgpu sampler
+  [addressModeU  address-mode clamp-to-edge]
+  [addressModeV  address-mode clamp-to-edge]
+  [addressModeW  address-mode clamp-to-edge]
+  [magFilter     filter-mode        nearest]
+  [minFilter     filter-mode        nearest]
+  [mipmapFilter  mipmap-filter-mode nearest]
+  [lodMinClamp   :f32                     0]
+  [lodMaxClamp   :f32                    32]
+  [compare       compare-function          ]
+  [maxAnisotropy ::u16                    1])
 
 (defflag shader-stage
   "Compile-time constants equivalent to the runtime `js/GPUShaderStage`."
@@ -367,90 +370,80 @@
   stage-fragment
   stage-compute)
 
-(defgpu buffer
-  [size             :u64]
-  [usage            ::buffer-usage]
-  [mappedAtCreation :bool false])
+(defenum buffer-binding-type
+  {:repr :string}
+  uniform
+  storage
+  read-only-storage)
 
-(defgpu texture
-  [size          :ivec3]
-  [mipLevelCount :i32 1]
-  [sampleCount   :i32 1]
-  [dimension     ::texture-dimension "2d"]
-  [format        ::texture-format]
-  [usage         ::texture-usage]
-  [viewFormats   (:array ::texture-format) util/empty-array])
+(defbind-layout bind-buffer
+  [type             buffer-binding-type uniform]
+  [hasDynamicOffset :bool               false]
+  [minBindingSize   :u64                0])
 
-(defgpu texture-view
-  [format          ::texture-format]
-  [dimension       ::texture-view-dimension]
-  [aspect          ::texture-aspect]
-  [mipLevelCount   :u32]
-  [arrayLayerCount :u32]
-  [baseMipLevel    :u32 0]
-  [baseArrayLayer  :u32 0])
+(defenum sampler-binding-type
+  {:repr :string}
+  filtering
+  non-filtering
+  comparison)
 
-(defgpu external-texture
-  "Creates a texture from an external video object."
-  {:create import}
-  [source     :js/HTMLVideoElement]
-  [colorSpace #{"srgb" "display-p3"} "srgb"])
+(defbind-layout bind-sampler
+  [type sampler-binding-type filtering])
 
-(defgpu sampler
-  [addressModeU  ::address-mode "clamp-to-edge"]
-  [addressModeV  ::address-mode "clamp-to-edge"]
-  [addressModeW  ::address-mode "clamp-to-edge"]
-  [magFilter     ::filter-mode        "nearest"]
-  [minFilter     ::filter-mode        "nearest"]
-  [mipmapFilter  ::mipmap-filter-mode "nearest"]
-  [lodMinClamp   :f32  0]
-  [lodMaxClamp   :f32 32]
-  [compare       ::compare-function]
-  [maxAnisotropy ::u16 1])
+(defenum texture-sample-type
+  {:repr :string}
+  float
+  unfilterable-float
+  depth
+  sint
+  uint)
 
-(defbind-layout buffer-binding
-  [type             ::buffer-binding-type "uniform"]
-  [hasDynamicOffset :bool false]
-  [minBindingSize   :u64  0])
+(defbind-layout bind-texture
+  [sampleType    texture-sample-type    float]
+  [viewDimension texture-view-dimension view-2d]
+  [multisampled  :bool                  false])
 
-(defbind-layout sampler-binding
-  [type ::sampler-binding-type "filtering"])
+(defenum storage-texture-access
+  {:repr :string}
+  write-only)
 
-(defbind-layout texture-binding
-  [sampleType    ::texture-sample-type "float"]
-  [viewDimension ::texture-view-dimension "2d"]
-  [multisampled  :bool false])
+(defbind-layout bind-storage-texture
+  [access        storage-texture-access write-only]
+  [format        texture-format]
+  [viewDimension texture-view-dimension view-2d])
 
-(defbind-layout storage-texture-binding
-  [access        ::storage-texture-access "write-only"]
-  [format        ::texture-format]
-  [viewDimension ::texture-view-dimesion "2d"])
-
-(defbind-layout external-texture-binding)
+(defbind-layout bind-external-texture)
 
 (defgpu bind-group-layout
-  [entries (:array ::bind-group-layout-entry)])
+  [entries [::bind-group-layout-entry]])
 
 (defbind bind-group-entry
   [binding  :i32]
   [resource ::binding-resource])
 
-(defentry buffer-binding
+(defbind buffer-binding
+  {:index true}
   [buffer ::buffer]
   [offset :u64 0]
   [size   :u64 0])
 
 (defgpu bind-group
   [layout ::bind-group-layout]
-  [entries (:array ::bind-group-entry)])
+  [entries [::bind-group-entry]])
 
 (defgpu pipeline-layout
-  [bindGroupLayouts (:array ::bind-group-layout)])
+  [bindGroupLayouts [::bind-group-layout]])
 
 (defgpu shader-module
   [code      :str]
   [sourceMap :object]
   [hints     {:str ::shader-module-compilation-hints}])
+
+(defenum compilation-message-type
+  {:repr :string} ; TODO need to reverse direction, this one mostly (string -> enum), not (enum -> string)
+  error
+  warning
+  info)
 
 (defgpu compute-pipeline
   "Low-level pipeline creation, called from `bllm.wgsl`.
@@ -459,11 +452,15 @@
   ^:static
   [compute ::programmable-stage])
 
+(defstage compute
+  "Setups the compute stage before calling `compute-pipeline`."
+  compute-pipeline-desc GPUProgrammableStage)
+
 (defgpu render-pipeline
   "Low-level pipeline creation, called from `bllm.wgsl`.
 
   Note: set the `vertex` and `fragment` stages *before* calling this."
-  [layout       #{::pipeline-layout "auto"}]
+  [layout       ::pipeline-layout] ; TODO should auto layouts even be supported? can't guarantee group-compatible layouts
   ^:static
   [vertex       ::vertex-state]
   [primitive    ::primitive-state     util/empty-obj]
@@ -472,19 +469,124 @@
   ^:static
   [fragment     ::fragment-state])
 
-(defstage compute
-  "Setups the compute stage before calling `compute-pipeline`."
-  compute-pipeline-desc GPUProgrammableStage)
-
 (defstage vertex
   "Setups the vertex stage before calling `render-pipeline`."
   render-pipeline-desc GPUVertexState
-  [buffers (:array ::gpu-vertex-buffer-layout)])
+  [buffers [::gpu-vertex-buffer-layout]])
 
 (defstage fragment
   "Setups the fragment stage before calling `render-pipeline`."
   render-pipeline-desc GPUFragmentState
-  [targets (:array ::gpu-color-target-state)])
+  [targets [::gpu-color-target-state]])
+
+(defenum topology
+  {:repr :string}
+  point-list
+  line-list
+  line-strip
+  triangle-list
+  triangle-strip)
+
+(defenum front-face
+  {:repr :string}
+  ccw
+  cw)
+
+(defenum cull-mode
+  {:repr :string}
+  none
+  front
+  back)
+
+(defenum blend-factor
+  {:repr :string :prefix blend-}
+  blend-zero
+  blend-one
+  src
+  src-alpha
+  dst
+  dst-alpha
+  one-minus-src
+  one-minus-src-alpha
+  one-minus-dst
+  one-minus-dst-alpha
+  src-alpha-saturated
+  constant
+  one-minus-constant)
+
+(defenum blend-operation
+  {:repr :string}
+  add
+  subtract
+  reverse-subtract
+  min
+  max)
+
+(defflag color-write
+  "Values for the write-mask of a color target state."
+  red
+  green
+  blue
+  alpha)
+
+(defconst color-write-all
+  (bit-or red green blue alpha))
+
+(defenum stencil-operation
+  {:repr :string}
+  keep
+  zero
+  replace
+  invert
+  increment-clamp
+  decrement-clamp
+  increment-wrap
+  decrement-wrap)
+
+(defenum index-format
+  "Memory layout of an index element."
+  {:repr :string :prefix index-}
+  index-uint16
+  index-uint32)
+
+(defenum vertex-format
+  "Memory layout of a vertex attribute."
+  {:repr :string}
+  uint8x2
+  uint8x4
+  sint8x2
+  sint8x4
+  unorm8x2
+  unorm8x4
+  snorm8x2
+  snorm8x4
+  uint16x2
+  uint16x4
+  sint16x2
+  sint16x4
+  unorm16x2
+  unorm16x4
+  snorm16x2
+  snorm16x4
+  float16x2
+  float16x4
+  float32
+  float32x2
+  float32x3
+  float32x4
+  uint32
+  uint32x2
+  uint32x3
+  uint32x4
+  sint32
+  sint32x2
+  sint32x3
+  sint32x4)
+
+(defenum vertex-step-mode
+  {:repr :string :prefix step-}
+  step-vertex
+  step-instance)
 
 (defgpu command-encoder)
 
@@ -499,7 +601,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (comment
-  (def my-buf (buffer "test" 4096 (bit-or js/GPUBufferUsage.COPY_DST js/GPUBufferUsage.VERTEX) false))
+  (def my-buf (buffer "test" 4096 (bit-or copy-dst-buffer vertex-buffer) false))
   (.destroy my-buf)
   (.writeBuffer (.-queue device)
                 my-buf
@@ -507,7 +609,7 @@
                 (js/Float32Array. #js [1 2 3]))
   (js/console.log my-buf)
 
-  (def uni-buf (buffer "uniform" 128 (bit-or js/GPUBufferUsage.MAP_WRITE js/GPUBufferUsage.UNIFORM) true))
+  (def uni-buf (buffer "uniform" 128 (bit-or map-write-buffer uniform-buffer) true))
   (def uni-ptr (.getMappedRange uni-buf))
   (js/console.log uni-ptr)
   )
@@ -519,45 +621,6 @@
 
 ;;; Samplers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-;;; Resource Bindings
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def ^:private layout-entries #js [])
-
-(defn- bind-group-layout-entry [group index visibility]
-  ;; - bind index
-  ;; - stage visibility
-
-  ;; reusable descriptors, different types:
-  ;;   buffer : uniform, storage, read-only-storage
-  ;;   - hasDynamicOffset, minBindingSize (IMPORTANT)
-  ;;   sampler : filtering, non-filtering, comparison
-  ;;   texture : float, unfilterable-float, depth, sint, uint
-  ;;   - viewDimension, multisampled
-  ;;   storage : write-only
-  ;;   - format, viewDimension
-  ;;   external : ??
-  )
-
-;; Flow:
-;; (defuniform)
-;; (deftexture)
-;; (defsampler)
-;; (defgroup)
-;; (defgroup (deftexture))
-;; (deflayout)
-;; (defvertex)
-;; (defpixel)
-;; (defcompute)
-;; (defrender)
-;; (defcompute)
-;;
-;; node.gpu -> for group, layout, entry, pipeline
-;; - cant be gpu/defres directly, not a def
-;; - just emit call to underlying gpu/reg-resource -> same result
-;; - will need to destroy gpu objects when recreating nodes, if different
 
 
 ;;; Shader Modules
