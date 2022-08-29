@@ -72,6 +72,9 @@
   (let [a (dec alignment)]
     (bit-and (+ a size) (bit-not a))))
 
+(defn field-name [s]
+  (symbol (str \- s)))
+
 (defn sym [^clojure.lang.Keyword k]
   (.sym k))
 

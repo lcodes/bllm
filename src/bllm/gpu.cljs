@@ -11,7 +11,7 @@
 
   And some caveats:
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
-  (:require-macros [bllm.gpu :refer [defentry defgpu defstage]])
+  (:require-macros [bllm.gpu :refer [defbind defbind-layout defgpu defstage]])
   (:require [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
 
@@ -408,30 +408,30 @@
   [compare       ::compare-function]
   [maxAnisotropy ::u16 1])
 
-(defentry buffer-binding-layout
+(defbind-layout buffer-binding
   [type             ::buffer-binding-type "uniform"]
   [hasDynamicOffset :bool false]
   [minBindingSize   :u64  0])
 
-(defentry sampler-binding-layout
+(defbind-layout sampler-binding
   [type ::sampler-binding-type "filtering"])
 
-(defentry texture-binding-layout
+(defbind-layout texture-binding
   [sampleType    ::texture-sample-type "float"]
   [viewDimension ::texture-view-dimension "2d"]
   [multisampled  :bool false])
 
-(defentry storage-texture-binding-layout
+(defbind-layout storage-texture-binding
   [access        ::storage-texture-access "write-only"]
   [format        ::texture-format]
   [viewDimension ::texture-view-dimesion "2d"])
 
-(defentry external-texture-binding-layout)
+(defbind-layout external-texture-binding)
 
 (defgpu bind-group-layout
   [entries (:array ::bind-group-layout-entry)])
 
-(defentry bind-group-entry
+(defbind bind-group-entry
   [binding  :i32]
   [resource ::binding-resource])
 
@@ -524,10 +524,9 @@
 ;;; Resource Bindings
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:private bind-entries #js [])
+(def ^:private layout-entries #js [])
 
-
-(defn bind [group index visibility]
+(defn- bind-group-layout-entry [group index visibility]
   ;; - bind index
   ;; - stage visibility
 
@@ -540,8 +539,6 @@
   ;;   storage : write-only
   ;;   - format, viewDimension
   ;;   external : ??
-
-
   )
 
 ;; Flow:
