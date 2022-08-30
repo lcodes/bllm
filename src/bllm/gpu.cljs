@@ -479,7 +479,7 @@
   render-pipeline-desc GPUFragmentState
   [targets [::gpu-color-target-state]])
 
-(defenum topology
+(defenum primitive-topology
   {:repr :string}
   point-list
   line-list
@@ -704,7 +704,7 @@ fn frag() -> @location(0) vec4<f32> {
     ;; TODO: get full range of versions this relates to. This is on FF 105.0a1.
     (set! preferred-format
           (if (undefined? (.-getPreferredFormat ctx))
-            "bgra8unorm"
+            (texture-format bgra8unorm)
             (.getPreferredFormat ctx adapter))))
   preferred-format)
 

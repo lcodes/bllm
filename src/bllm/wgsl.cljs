@@ -327,7 +327,7 @@
   (let [kind node.kind]
     (or (=== Vertex kind) (=== Pixel kind) (=== Kernel kind))))
 
-(defn- compile [node] ; TODO from pipeline request -> gpu/defres
+(defn compile [node] ; TODO from pipeline request -> gpu/defres
   (assert (entry? node))
   (.add entry-ids node.uuid)
   ;; - variant overrides

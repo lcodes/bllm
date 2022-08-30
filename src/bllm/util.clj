@@ -201,6 +201,14 @@
     ~(with-out-str
       (clojure.pprint/pprint &env))))
 
+(defmacro dump-var
+  "Development helper to inspect ClojureScript's `resolve-var`."
+  [sym]
+  `(js/console.log
+    ~(with-out-str
+       (clojure.pprint/pprint
+        (cljs.analyzer/resolve-existing-var &env sym)))))
+
 
 ;;; DWIM -> Direct access to JavaScript's good parts, or "I know what I'm doing"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

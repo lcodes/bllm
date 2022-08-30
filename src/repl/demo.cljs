@@ -13,12 +13,6 @@
 ;; - right now just porting old WebGL2 code, need to push that wgsl codegen
 ;; - plan is to get working pipelines, gpu resources, then simplify, then move
 
-(meta/defenum bind-group
-  FRAME
-  PASS
-  EFFECT
-  MODEL)
-
 (wgsl/defconst E    2.7182818284590452)
 (wgsl/defconst PI   3.1415926535897932)
 (wgsl/defconst PI-2 1.5707963267948966)
@@ -26,15 +20,30 @@
 (wgsl/defconst PI*2 6.2831853071795864)
 (wgsl/defconst EPSILON 1e-10)
 
-(wgsl/definterpolant io-texcoord    0 :vec2)
+(meta/defenum bind-group
+  FRAME
+  PASS
+  EFFECT
+  MODEL)
 
-(wgsl/defuniform frame
-  ""
-  FRAME 0
-  [time       :vec4]
-  [sin-time   :vec4]
-  [delta-time :vec4]
-  [number     :u32])
+(wgsl/defgroup test-data
+  FRAME)
+
+(wgsl/defgroup frame-data
+  "Values uploaded once per frame to the GPU."
+  FRAME
+  (wgsl/defuniform frame
+    ""
+    [time       :vec4]
+    [sin-time   :vec4]
+    [delta-time :vec4]
+    [number     :u32])
+  (wgsl/defsampler linear)
+  (wgsl/defsampler linear-mip)
+  (wgsl/defsampler linear-repeat))
+
+(wgsl/deflayout empty-layout "Simplest pipeline layout: doesn't contain any bind groups.")
+(wgsl/deflayout frame-layout frame-data)
 
 (wgsl/defuniform screen
   PASS 3
@@ -52,6 +61,8 @@
   [proj-inv      :mat4]
   [view-proj-inv :mat4])
 
+
+(wgsl/definterpolant io-texcoord 0 :vec2)
 
 (wgsl/defuniform hello EFFECT 0
   [switch :bool])
@@ -112,18 +123,15 @@
 (wgsl/defdraw-target frag-color 0 :vec4
   "Generic fragment draw target.")
 
+(wgsl/definterpolant io-texcoord-3d 0 :vec3)
+
+(wgsl/deftexture tex-skybox EFFECT 0 :tex-cube :f32)
+
 (wgsl/defvertex vs-demo
-  "Hello triangle!"
-  (position = local-position))
+  (position = (vec4 local-position 1)))
 
 (wgsl/defpixel ps-demo
   (frag-color = (vec4 0.42 0 0.69 1)))
-
-(wgsl/definterpolant io-texcoord-3d 0 :vec3)
-
-(wgsl/defsampler linear-mip FRAME 1)
-
-(wgsl/deftexture tex-skybox EFFECT 0 :tex-cube :f32)
 
 (wgsl/defvertex vs-sky
   "Infinitely large cube projected around the camera."
@@ -135,15 +143,33 @@
                   (.xyww))))
 
 (wgsl/defpixel ps-sky
-  "Should get the same output `GenIO` as `ps-demo`."
   (frag-color = (texture-sample tex-skybox linear-mip io-texcoord-3d)))
+
+(do (wgsl/compile vs-demo)
+    (wgsl/compile ps-demo)
+    (wgsl/compile vs-sky)
+    (wgsl/compile ps-sky))
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 (comment (js/console.log vs-demo.wgsl)
          (js/console.log ps-demo.wgsl)
 
          (js/console.log vs-sky.wgsl)
-         (js/console.log ps-sky.wgsl))
+         (js/console.log ps-sky.wgsl)
+         )
 
 (wgsl/defun screen-pos :vec4 [pos :vec4]
   (let [h (pos * 0.5)]
@@ -291,12 +317,12 @@
 (wgsl/defkernel lighting-cs [8 8]
   ;; TODO from material function
   (let [^:mut data (Surface)
-        albedo&specular (texture-load gbuffer-albedo io-texcoord 0)] ; TODO texcoord from invocation
+        xy global-invocation-id.xy
+        albedo&specular (texture-load gbuffer-albedo xy 0)]
     ;; TODO use specular
-    (data.albedo = albedo&specular.rgb))
-  #_(let [depth ()])
-  (lighting data)
-  )
+    (data.albedo = albedo&specular.rgb)
+    #_(let [depth ()])
+    (lighting data)))
 
 (wgsl/defuniform pp
   EFFECT 0
@@ -321,6 +347,7 @@
 
 (wgsl/defun tonemap:uncharted-2 [x :vec2]
   )
+
 
 ;; TODO will need some way of organizing binding numbers
 ;;  - declare group & bindings at once? at least removes group & bind args
@@ -358,8 +385,8 @@
         ru  (length ruv)
         rus (ru * sigma)
         ru  (if (ampli > 0)
-              ((tan (ru * theta)) * (1 / rus))
-              ((1 / ru) * theta * (atan rus)))]
+              (* (tan (ru * theta)) (1 / rus))
+              (* (1 / ru) theta (atan rus)))]
     (uv + ruv * (ru - 1))))
 
 (wgsl/defun ^:feature bloom [c :vec3 uv :vec2]
@@ -382,7 +409,6 @@
     (texture-load grading-lut x 0)
     (srgb->linear x)))
 
-
 (wgsl/defun ^:feature chromatic-aberration [uv :vec2]
   #_{:off (screen-color uv)
    :on _}
@@ -402,6 +428,8 @@
         l (mix 1 (1 - (sqrt (luminance c))) response)]
     (c + c * g * intensity * l)))
 
+(wgsl/deftexture cell-out MODEL 0 :tex-2d :f32)
+
 (wgsl/defkernel post-process [8 8]
   (let [uv (distort-uv global-invocation-id.xy)]
     (-> (chromatic-aberration uv)
@@ -411,8 +439,7 @@
         (color-grading)
         (grain uv)
         (vec4 1)
-        #_
-        (->> (texture-store out-color xy)))))
+        (->> (texture-store cell-out uv)))))
 
 (wgsl/defkernel bloom-prefilter [8 8]
   )
@@ -434,8 +461,6 @@
            &env ; -> usual macroexpand environment, augmented with WGSL state
            (do ; full clojure here -> arguments can be symbols, keywords, maps, vectors, etc
              `(1 + 2)))) ; "wgsl" code emitted
-
-(wgsl/deftexture cell-out MODEL 0 :tex-2d :f32)
 
 (wgsl/defkernel blur-h [8 8]
   )

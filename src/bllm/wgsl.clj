@@ -20,12 +20,15 @@
 ;;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- gpu-id [ns sym]
-  (assert (string? ns))
-  (assert (string? sym))
-  (let [h (bit-xor (hash ns) (hash sym))] ; Poor man's deterministic ID.
-    (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
-    h))
+(defn- gpu-id
+  ([sym]
+   (gpu-id (str *ns*) (name sym)))
+  ([ns sym]
+   (assert (string? ns))
+   (assert (string? sym))
+   (let [h (bit-xor (hash ns) (hash sym))] ; Poor man's deterministic ID.
+     (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
+     h)))
 
 (def ^:private gpu-ns
   "Converts a `Namespace` into a WGSL-compatible identifier. Memoized."
@@ -51,9 +54,6 @@
          (gpu-name 'in-position)
          (gpu-hash 1 "hi" :key 'sym))
 
-(defn- resolve-vars [env vars]
-  (map (partial ana/resolve-existing-var env) vars))
-
 (defn- emit-field
   [{:keys [name type offset]}]
   (list 'bllm.wgsl/field
@@ -74,7 +74,7 @@
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
   [& {:keys [sym expr wgsl hash kind ctor deps args]}]
-  (let [uuid (gpu-id (str *ns*) (name sym))
+  (let [uuid (gpu-id sym)
         hash (or  hash (gpu-hash args))
         name (and wgsl (gpu-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
@@ -108,12 +108,14 @@
      render
      compute})
 
+(defn- read-const [{expr :const-expr}]
+  (when-not (and (= :const  (:op  expr))
+                 (= 'number (:tag expr)))
+    (throw (ex-info "Expected number constant." {:expr expr})))
+  (:val expr))
+
 (defn- resolve-enum [env sym]
-  (let [v (:const-expr (ana/resolve-existing-var env sym))]
-    (when-not (and (= :const  (:op  v))
-                   (= 'number (:tag v)))
-      (throw (ex-info "Expected number constant." {:sym sym :expr v})))
-    (:val v)))
+  (read-const (ana/resolve-existing-var env sym)))
 
 (defn- invalid-bind-prop [key val]
   (throw (ex-info "Expected number or symbol." {:key key :in val})))
@@ -212,19 +214,19 @@
 
 (def state-props
   "Specification of the render state properties."
-  (-> '{primitive     [topology               [:triangle-list :topology]
+  (-> '{primitive     [topology               [:triangle-list :primitive-topology]
                        strip-index-format     [nil            :index-format]
                        front-face             [:ccw           :front-face]
                        cull-mode              [:none          :cull-mode]
                        unclipped-depth        false]
-        stencil-face  [compare                [:fn-always :compare-fn]
-                       fail-op                [:op-keep   :stencil-op]
-                       depth-op               [:op-keep   :stencil-op]
-                       depth-fail-op          [:op-keep   :stencil-op]
-                       pass-op                [:op-keep   :stencil-op]]
-        depth-stencil [format                 [:required  :texture-format]
+        stencil-face  [compare                [:always   :compare-function]
+                       fail-op                [:keep     :stencil-operation]
+                       depth-op               [:keep     :stencil-operation]
+                       depth-fail-op          [:keep     :stencil-operation]
+                       pass-op                [:keep     :stencil-operation]]
+        depth-stencil [format                 [:required :texture-format]
                        depth-write?           false
-                       depth-compare          [:fn-always :compare-fn]
+                       depth-compare          [:always   :compare-function]
                        stencil-front          bllm.util/empty-obj
                        stencil-back           bllm.util/empty-obj
                        stencil-read-mask      0xffffffff
@@ -235,23 +237,24 @@
         multisample   [count                  1
                        mask                   0xffffffff
                        alpha-to-coverage?     false]
-        blend-comp    [operation              [:op-add :blend-op]
-                       src-factor             [:one    :blend-factor]
-                       dst-factor             [:zero   :blend-factor]]
+        blend-comp    [operation              [:add        :blend-operation]
+                       src-factor             [:blend-one  :blend-factor]
+                       dst-factor             [:blend-zero :blend-factor]]
         blend         [color                  :required
                        alpha                  :required]}
       (update-vals (partial partition 2))))
 
 (defn- state-tag [s]
-  (symbol "js" (str "GPU" (util/kebab->pascal s) "State")))
+  (util/js-sym (str "GPU" (util/kebab->pascal s) "State")))
 
 (defn- rename-state-prop
   "Converts a lispy `foo?` symbol into a WebGPU `foo-enabled` property name."
   [sym]
-  (let [s (name sym)]
-    (if-not (str/ends-with? s "?")
-      s
-      (str (subs s 0 (dec (count s))) "-enabled"))))
+  (util/kebab->camel
+   (let [s (name sym)]
+     (if-not (str/ends-with? s "?")
+       s
+       (str (subs s 0 (dec (count s))) "Enabled")))))
 
 (defn- required-prop [sym]
   `(do (assert ~sym ~(str "Param " sym " is required"))
@@ -288,12 +291,12 @@
                    ~@(when (has-deps? state) '[deps])
                    ~@names]
        ~(emit-obj state nil
-                  (map util/kebab->camel names)
+                  (map rename-state-prop names)
                   (map configure-state props)))))
 
 (defm ^:private defstate
   "Simpler `defnode` used to declare render states. Constructed with kw-args."
-  [sym & deps]
+  [sym deps]
   (let [kind  (node-kind sym)
         k-sym (util/sym kind)
         props (state-props k-sym)
@@ -305,7 +308,7 @@
         :kind ~kind
         :ctor '~(util/keyword->wgsl kind)
         :deps ~(when (has-deps? k-sym)
-                 `(->> (filter some? [~@deps])
+                 `(->> (filter some? ~deps)
                        (map (comp ::uuid #(ana/resolve-existing-var ~'&env %)))))
         :args (map util/keyword->gpu ~names)))))
 
@@ -316,7 +319,7 @@
 
 (defstate defdepth-stencil
   "Describes how a pipeline will affect a render pass's depth-stencil attachment."
-  stencil-front stencil-back)
+  [stencil-front stencil-back])
 
 (defstate defmultisample
   "Describes how a pipeline interacts with a render pass's multisampled attachments.")
@@ -325,7 +328,7 @@
   "Describes how the color or alpha components of a fragment are blended.")
 
 (defstate defblend
-  color alpha)
+  [color alpha])
 
 
 ;;; I/O - Builtin vars, vertex attributes, interpolants, fragment draw targets
@@ -973,56 +976,77 @@
 ;;; Resource Groups
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- resolve-bindings [env args sort-key allowed-kinds emit-fn]
-  (when (empty? args)
-   (throw (ex-info "Expecting binding list" {})))
-  (let [vars (resolve-vars env args)]
-    (doseq [v vars]
-      (when-not (allowed-kinds (::kind v))
-        (throw (ex-info "Unexpected binding kind"
-                        {:expected allowed-kinds :found (::kind v) :in v}))))
-    (let [sorted-vars (sort-by sort-key vars)]
-      (emit-fn sorted-vars (map ::uuid vars)))))
+(defn doc-string|attr-map? [x]
+  (or (string? x) (map? x)))
 
-(defn- emit-group [vars deps]
-  (when-not (apply = (map ::group vars))
-    (throw (ex-info "Group bindings must match" {:in vars})))
-  (when-not (distinct? (map ::bind vars))
-    (throw (ex-info "Group bindings cannot overlap" {:in vars})))
-  (let [g (::group (first vars))]
-    (with-meta {:value g} {:deps deps ::group g})))
+(defn- splice-group-bind [group bind [ctor sym & args]]
+  (let [l (take-while doc-string|attr-map? args)]
+    (concat (list ctor sym) l
+            (list group bind)
+            (drop (count l) args))))
 
-(defn- emit-layout [vars deps]
-  (when-not (distinct? (map ::group vars))
-    (throw (ex-info "Layout groups cannot overlap" {:in vars})))
-  (let [grps (loop [vars vars
-                    bind 0
-                    grps ()]
-               (if-not vars
-                 `(cljs.core/array ~@(reverse grps))
-                 (let [v (first vars)
-                       g (when (= bind (::group v))
-                           (:name v))]
-                   (recur (if g (next vars) vars)
-                          (inc bind)
-                          (cons g grps)))))]
-    (with-meta grps {:deps deps})))
+(comment (splice-group-bind 0 1 '(defsomething hello "world" {:key :val} [body of] args)))
 
-;; TODO constructor for resource bindings
-(defnode defgroup
-  {:wgsl false :keys [:value]}
+(defn bit-find [x n]
+  (loop [n n]
+    (if-not (bit-test x n)
+      n
+      (recur (inc n)))))
+
+(comment (bit-find (bit-or 2 8) 0))
+
+(defm defgroup
   [sym & binds]
-  (resolve-bindings &env binds ::bind
-                    #{:uniform :storage :texture :sampler}
-                    emit-group))
+  (loop [args binds
+         deps ()
+         defs ()
+         used 0
+         grp  -1]
+    (if-not args
+      (do (when (neg? grp)
+            (throw (Exception. "Missing group number")))
+          (loop [defs (reverse defs)
+                 used used
+                 bind (bit-find used 0)
+                 out ()]
+            (if (empty? defs)
+              `(do ~@(reverse out))
+              (recur (next defs)
+                     (long (bit-set used bind))
+                     (bit-find used (inc bind))
+                     (conj out (splice-group-bind grp bind (first defs)))))))
+      (let [arg (first args)
+            def (when (seq? arg) arg)
+            dep (if-not def
+                  (ana/resolve-existing-var &env arg)
+                  {::uuid (gpu-id (second def))})]
+        (if (:const dep)
+          (recur (next args) deps defs used
+                 (long (do (when (nat-int? grp)
+                             (throw (Exception. "Group already specified")))
+                           (read-const dep))))
+          (recur (next args) (conj deps dep)
+                 (if def (conj defs def) defs)
+                 (long (if-let [bind (::bind dep)]
+                         (do (when (bit-test used bind)
+                               (throw (ex-info "Group binding already in use"
+                                               {:used used :dep dep :arg arg})))
+                             (bit-set used bind))
+                         used))
+                 (long (do (when (not= grp (::group dep grp))
+                             (throw (ex-info "Group mismatch" {:grp grp
+                                                               :dep dep
+                                                               :arg arg})))
+                           grp))))))))
 
-;; TODO gpu/defres for layout object
-(defnode deflayout
-  {:wgsl false}
+(defm deflayout
   [sym & groups]
-  (resolve-bindings &env groups ::group
-                    #{:group}
-                    emit-layout))
+  ;; how is this different from group?
+
+  ;; no layout #
+  ;; bind # tracking is the same, except on defgroup rather than def*bindings
+  ;; - same inline gpu/reg-resource in layout
+  )
 
 
 ;;; Shader Pipelines - Runtime Execution State
@@ -1043,6 +1067,9 @@
   ;; TODO where does `gpu/defres` fit in this -> implement that subsystem first
   (with-meta `(cljs.core/array ~@(map :name elems))
     {:deps (filter some? (map ::uuid elems))}))
+
+(defn- resolve-vars [env vars]
+  (map (partial ana/resolve-existing-var env) vars))
 
 (defnode defrender
   {:wgsl false}
