@@ -129,6 +129,16 @@
          (to-js {:a "hello" :b 123})
          (to-js {:a [1 2 3]}))
 
+(defn doc-string|attr-map? [x]
+  (or (string? x) (map? x)))
+
+(defn splice-defm [elems [ctor sym & args]]
+  (let [l (take-while doc-string|attr-map? args)]
+    (concat (list ctor sym) l elems
+            (drop (count l) args))))
+
+(comment (splice-defm [0 1] '(defsomething hello "world" {:key :val} [body of] args)))
+
 (def spaces
   "Preallocated indentation spaces."
   (mapv #(.repeat " " (* 2 %)) (range 16)))
@@ -194,20 +204,30 @@
     `(defonce ~sym ~init)
     `(def ~sym ~init))) ; Advanced compilation doesn't fully remove `defonce`.
 
+(defn pp
+  "Development helper to pretty print to string."
+  [form]
+  (with-out-str (clojure.pprint/pprint form)))
+
+(defn log
+  "Development helper to pretty print data to the JavaScript console."
+  [form]
+  `(js/console.log ~(pp form)))
+
+(defmacro dump
+  "Development helper to pretty print ClojureScript's `macroexpand-1`."
+  [form]
+  (log (cljs.analyzer/macroexpand-1 &env form)))
+
 (defmacro dump-env
   "Development helper to inspect ClojureScript's macro `&env`."
   []
-  `(js/console.log
-    ~(with-out-str
-      (clojure.pprint/pprint &env))))
+  (log &env))
 
 (defmacro dump-var
   "Development helper to inspect ClojureScript's `resolve-var`."
   [sym]
-  `(js/console.log
-    ~(with-out-str
-       (clojure.pprint/pprint
-        (cljs.analyzer/resolve-existing-var &env sym)))))
+  `(log (cljs.analyzer/resolve-existing-var &env sym)))
 
 
 ;;; DWIM -> Direct access to JavaScript's good parts, or "I know what I'm doing"

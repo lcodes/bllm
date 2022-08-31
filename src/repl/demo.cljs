@@ -26,10 +26,7 @@
   EFFECT
   MODEL)
 
-(wgsl/defgroup test-data
-  FRAME)
-
-(wgsl/defgroup frame-data
+(wgsl/defgroup ^:override frame-data
   "Values uploaded once per frame to the GPU."
   FRAME
   (wgsl/defuniform frame
@@ -42,8 +39,19 @@
   (wgsl/defsampler linear-mip)
   (wgsl/defsampler linear-repeat))
 
-(wgsl/deflayout empty-layout "Simplest pipeline layout: doesn't contain any bind groups.")
-(wgsl/deflayout frame-layout frame-data)
+(wgsl/defgroup test-data
+  EFFECT
+  (wgsl/defsampler albedo-sampler))
+
+(wgsl/deflayout test-layout
+  test-data
+  frame-data
+  (wgsl/defgroup test-group-a
+    (wgsl/defsampler test-sampler-b)
+    (wgsl/deftexture test-tex :tex-2d :f32)))
+
+(util/dump
+ (wgsl/deflayout empty-layout "Simplest pipeline layout: doesn't contain any bind groups."))
 
 (wgsl/defuniform screen
   PASS 3

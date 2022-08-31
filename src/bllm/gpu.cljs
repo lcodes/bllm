@@ -11,7 +11,7 @@
 
   And some caveats:
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
-  (:refer-clojure :exclude [float max min])
+  (:refer-clojure :exclude [float keep max min repeat replace])
   (:require-macros [bllm.gpu :refer [defbind defbind-layout defgpu defstage]])
   (:require [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))

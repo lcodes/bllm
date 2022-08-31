@@ -136,3 +136,47 @@
         ~(hash sym) ~(hash init)
         (fn get [] ~sym) ; NOTE only required in development
         (fn set [] (set! ~sym ~init)))))
+
+;; TODO overridable compile-time "min requirements"
+;; - validate only overridden values against device
+;; - these defaults are guaranteed to be supported
+;; - warn when emitting code breaking min specs
+;;   (ie wgsl/defkernel pulling in 10 storage buffers)
+;; - force authors to flag requirements above defaults
+;;   provide fallbacks all the way to min specs
+;; - setup alternatives at device creation, then forget
+(def limits
+  {:max-texture-dimension-1d 0x2000
+   :max-texture-dimension-2d 0x2000
+   :max-texture-dimension-3d 0x800
+   :max-texture-array-layers 0x100
+   :max-bind-groups 4
+   :max-dynamic-uniform-buffers-per-pipeline-layout 8
+   :max-dynamic-storage-buffers-per-pipeline-layout 4
+   :max-sampled-textures-per-shader-stage 16
+   :max-samplers-per-shader-stage 16
+   :max-storage-buffers-per-shader-stage 8
+   :max-storage-textures-per-shader-stage 4
+   :max-uniform-buffers-per-shader-stage 12
+   :max-uniform-buffer-binding-size 0x10000 ; 64Kb
+   :max-storage-buffer-binding-size 0x8000000 ; 128Mb
+   :min-uniform-buffer-offset-alignment 0x100
+   :min-storage-buffer-offset-alignment 0x100
+   :max-vertex-buffers 8
+   :max-vertex-attributes 16
+   :max-vertex-buffer-array-stride 0x800 ; 2Kb
+   :max-inter-stage-shader-components 60
+   :max-inter-stage-shader-variables 16
+   :max-color-attachments 8
+   :max-compute-workgroup-storage-size 0x4000 ; 16Kb
+   :max-compute-invocations-per-workgroup 0x100
+   :max-compute-workgroup-size-x 256
+   :max-compute-workgroup-size-y 256
+   :max-compute-workgroup-size-z 64
+   :max-compute-workgroups-per-dimension 0xFFFF})
+
+(defn check-limit [v k]
+  (let [limit (limits k)]
+    (when (> v limit)
+      (throw (ex-info "Default limit exceeded"
+                      {:value v :limit k :default limit})))))

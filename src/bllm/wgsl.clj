@@ -11,8 +11,8 @@
   Leverage figwheel to hot-reload shader code the same way it does with JS."
   (:refer-clojure :exclude [defstruct newline])
   (:require [cljs.analyzer  :as ana]
-            [clojure.inspector :refer [inspect]]
             [clojure.string :as str]
+            [bllm.gpu  :as gpu]
             [bllm.meta :as meta]
             [bllm.util :as util :refer [defm]]))
 
@@ -73,7 +73,7 @@
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
-  [& {:keys [sym expr wgsl hash kind ctor deps args]}]
+  [& {:keys [sym expr wgsl hash kind deps args]}]
   (let [uuid (gpu-id sym)
         hash (or  hash (gpu-hash args))
         name (and wgsl (gpu-name sym))
@@ -81,7 +81,7 @@
                wgsl (vary-meta assoc ::name name)
                expr (vary-meta expr))]
     `(do (def ~sym
-           (~ctor ~uuid ~hash
+           (~(util/keyword->wgsl kind) ~uuid ~hash
             ~@(when wgsl [name])
             ~@(cond (nil?   deps) nil
                     (empty? deps) ['bllm.util/empty-array]
@@ -165,7 +165,6 @@
           :wgsl ~(:wgsl attrs true)
           :hash (::hash ~gmeta)
           :kind ~kind
-          :ctor '~(util/keyword->wgsl kind)
           :deps ~(when (has-deps? (util/sym kind))
                   `(:deps ~gmeta []))
           :args (map util/keyword->wgsl
@@ -306,7 +305,6 @@
         :wgsl false
         :sym  ~'name
         :kind ~kind
-        :ctor '~(util/keyword->wgsl kind)
         :deps ~(when (has-deps? k-sym)
                  `(->> (filter some? ~deps)
                        (map (comp ::uuid #(ana/resolve-existing-var ~'&env %)))))
@@ -333,6 +331,8 @@
 
 ;;; I/O - Builtin vars, vertex attributes, interpolants, fragment draw targets
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; TODO `defgroup` treatment: `defstream` for vertex buffers and `deftarget`?
 
 (defn- io-expr [prefix-fn m]
   (assoc m ::expr (str \_ (prefix-fn m) \. (::name m))))
@@ -403,6 +403,8 @@
 
 ;;; WGSL Expanders - Support for infix and macro special forms
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ns-lib (symbol util/ns-lib))
 
 ;; TODO move to cljs compiler context? allow cljs defs to add more operators at compile time
 (def precedence '{*  5
@@ -831,21 +833,6 @@
 
     (throw (ex-info "Unexpected function value" {:func fn}))))
 
-(defn- compile-fn [cljs-env body link-fn]
-  (let [deps (java.util.HashSet.)
-        cljs (->ParseCtx cljs-env deps)
-        env  (merge (base-env) ; TODO remember env between macros expansions? detect changes from macros in bllm.base
-                    (:locals cljs-env)) ; TODO warn when locals shadow base-env?
-        code (for [expr body]
-               (parse cljs env expr))
-        wgsl (binding [*indent* 1]
-               ;; TODO refactor code before gen, WGSL more restrictive than CLJS
-               ;; - lift stmts outside expressions, introduce temporary locals
-               ;; - remove pure expressions from nonterminal stmts (do 1 2 3) -> 3
-               (with-out-str
-                 (gen-block code)))]
-    (link-fn deps code wgsl))) ; TODO code -> sourcemap
-
 
 ;;; Shader Code - Declarations of Constants, Variables, Functions & Entry Points
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -881,6 +868,21 @@
    :info {:name sym}
    :tag tag
    :local :arg})
+
+(defn- compile-fn [cljs-env body link-fn]
+  (let [deps (java.util.HashSet.)
+        cljs (->ParseCtx cljs-env deps)
+        env  (merge (base-env) ; TODO remember env between macros expansions? detect changes from macros in bllm.base
+                    (:locals cljs-env)) ; TODO warn when locals shadow base-env?
+        code (for [expr body]
+               (parse cljs env expr))
+        wgsl (binding [*indent* 1]
+               ;; TODO refactor code before gen, WGSL more restrictive than CLJS
+               ;; - lift stmts outside expressions, introduce temporary locals
+               ;; - remove pure expressions from nonterminal stmts (do 1 2 3) -> 3
+               (with-out-str
+                 (gen-block code)))]
+    (link-fn deps code wgsl))) ; TODO code -> sourcemap
 
 (defnode defun
   {:props false :kind :function
@@ -927,6 +929,21 @@
     `(bllm.wgsl/empty-io)
     `(bllm.wgsl/gen-io ~(hash ids) (bllm.util/array ~@ids))))
 
+(defn- check-workgroup-size [v k]
+  (when-not (or (nil? v) (symbol? v))
+    (if-not (nat-int? v)
+      (throw (ex-info "Invalid workgroup value" {:value v}))
+      (gpu/check-limit v k))))
+
+(comment (check-workgroup-size 8 :max-compute-workgroup-size-x))
+
+;; TODO wrap link-fn of stages:
+;; check :max-sampled-textures-per-shader-stage
+;; check :max-samplers-per-shader-stage
+;; check :max-storage-buffers-per-shader-stage
+;; check :max-storage-textures-per-shader-stage
+;; check :max-uniform-buffers-per-shader-stage
+
 (defnode defkernel
   "Defines a compute shader entry point.
 
@@ -937,6 +954,12 @@
   The workgoup size must also be specified. No default value suits all cases."
   {:keys [:in :x :y :z :wgsl] :props false}
   [sym [x y z] & body]
+  ;; TODO no check if fallback specified -> only validate min-specs
+  (check-workgroup-size x :max-compute-workgroup-size-x)
+  (check-workgroup-size y :max-compute-workgroup-size-y)
+  (check-workgroup-size z :max-compute-workgroup-size-z)
+  (when (and (number? x) (number? y) (number? z))
+    (check-limit (* x y z) :max-compute-invocations-per-workgroup))
   (compile-fn &env body
               (fn link [deps code wgsl]
                 (let [ids (select-node deps #(match-builtin % (::kind %)
@@ -946,7 +969,10 @@
                       (with-deps (gpu-hash x y z body)
                         {:in (gen-io ids) :x x :y y :z z :wgsl wgsl}))))))
 
+
+;; TODO step between compile and link -> validation!
 (defn- compile-io [stage in out env body]
+  ;; TODO check :max-inter-stage-shader-components/variables
   (compile-fn env body
               (fn link [deps code wgsl]
                 (let [ids-i (select-kind deps in  stage :in)
@@ -956,7 +982,7 @@
                              (ids-o id)))
                       (remove deps)
                       (with-deps (gpu-hash body)
-                        {:wgsl  wgsl
+                        {:wgsl wgsl
                          :in   (gen-io ids-i)
                          :out  (gen-io ids-o)}))))))
 
@@ -964,89 +990,139 @@
   "Defines a vertex shader entry point."
   {:keys [:in :out :wgsl]}
   [sym & body]
+  ;; TODO check :max-vertex-buffers, :max-vertex-attributes
   (compile-io :vertex :vertex-attr :interpolant &env body))
 
 (defnode defpixel
   "Defines a fragment shader entry point."
   {:keys [:in :out :wgsl]}
   [sym & body]
+  ;; TODO check :max-color-attachments
   (compile-io :fragment :interpolant :draw-target &env body))
 
 
 ;;; Resource Groups
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn doc-string|attr-map? [x]
-  (or (string? x) (map? x)))
+(defn- resolve-bind-var [env x]
+  (if-not (symbol? x)
+    x
+    (ana/resolve-existing-var env x)))
 
-(defn- splice-group-bind [group bind [ctor sym & args]]
-  (let [l (take-while doc-string|attr-map? args)]
-    (concat (list ctor sym) l
-            (list group bind)
-            (drop (count l) args))))
+(defn- resolve-binds [env args]
+  (map (partial resolve-bind-var env) args))
 
-(comment (splice-group-bind 0 1 '(defsomething hello "world" {:key :val} [body of] args)))
+(defn- parse-bind [bind-key vars bind-first bind-next inline emit]
+  (loop [vars vars
+         deps ()
+         defs ()
+         used 0]
+    (if vars
+      ;; 1 - Run through vars, separate inline defs from refs, compute bind mask.
+      (let [arg (first vars)
+            def (when (seq? arg) arg)
+            dep (if-not def arg {::uuid (gpu-id (second def)) ::inline true})]
+        (recur (next vars)
+               (conj deps dep)
+               (if def (conj defs def) defs)
+               (long (if-let [bind (get dep bind-key)]
+                       (do (when (bit-test used bind)
+                             (throw (ex-info "Binding already in use"
+                                             {:used used :dep dep :arg arg})))
+                           (bit-set used bind))
+                       used))))
+      ;; 2 - Bind inline defs.
+      (loop [bind bind-first
+             used used
+             defs (reverse defs)
+             gen  ()
+             out  ()]
+        (if (not-empty defs)
+          (let [used? (bit-test used bind)]
+            (recur (bind-next bind)
+                   (long (bit-set used bind))
+                   (if used? defs (next defs))
+                   (if used? gen  (conj gen bind))
+                   (if used? out  (conj out (util/splice-defm (inline bind)
+                                                              (first defs))))))
+          ;; 3 - Code generation.
+          `(do ~@(reverse out)
+               ~(emit (reverse deps)
+                      (reverse gen))))))))
 
-(defn bit-find [x n]
-  (loop [n n]
-    (if-not (bit-test x n)
-      n
-      (recur (inc n)))))
-
-(comment (bit-find (bit-or 2 8) 0))
+(defn- empty-defgroup []
+  (throw (Exception. "Empty defgroup")))
 
 (defm defgroup
   [sym & binds]
-  (loop [args binds
-         deps ()
-         defs ()
-         used 0
-         grp  -1]
-    (if-not args
-      (do (when (neg? grp)
-            (throw (Exception. "Missing group number")))
-          (loop [defs (reverse defs)
-                 used used
-                 bind (bit-find used 0)
-                 out ()]
-            (if (empty? defs)
-              `(do ~@(reverse out))
-              (recur (next defs)
-                     (long (bit-set used bind))
-                     (bit-find used (inc bind))
-                     (conj out (splice-group-bind grp bind (first defs)))))))
-      (let [arg (first args)
-            def (when (seq? arg) arg)
-            dep (if-not def
-                  (ana/resolve-existing-var &env arg)
-                  {::uuid (gpu-id (second def))})]
-        (if (:const dep)
-          (recur (next args) deps defs used
-                 (long (do (when (nat-int? grp)
-                             (throw (Exception. "Group already specified")))
-                           (read-const dep))))
-          (recur (next args) (conj deps dep)
-                 (if def (conj defs def) defs)
-                 (long (if-let [bind (::bind dep)]
-                         (do (when (bit-test used bind)
-                               (throw (ex-info "Group binding already in use"
-                                               {:used used :dep dep :arg arg})))
-                             (bit-set used bind))
-                         used))
-                 (long (do (when (not= grp (::group dep grp))
-                             (throw (ex-info "Group mismatch" {:grp grp
-                                                               :dep dep
-                                                               :arg arg})))
-                           grp))))))))
+  (if (empty? binds)
+    (empty-defgroup)
+    (let [vars (resolve-binds &env binds)
+          arg  (first vars)
+          grp  (cond (number? arg) arg
+                     (:const  arg) (read-const arg))
+          vars (if grp (next vars) vars)
+          grps (filter some? (map ::group vars))
+          grp  (or grp (first grps)
+                   (throw (Exception. "Missing group number")))]
+      (gpu/check-limit grp :max-bind-groups)
+      (when (and (zero? grp) (not (:override (meta sym))))
+        (throw (Exception. "Bind group 0 requires ^:override")))
+      (if (empty? vars)
+        (empty-defgroup)
+        (parse-bind ::bind vars 0 inc #(vector grp %)
+                    (fn [deps _]
+                      (emit-node :sym  (vary-meta sym assoc ::group grp)
+                                 :kind :group
+                                 :wgsl false
+                                 :hash (hash binds)
+                                 :deps (map ::uuid deps)
+                                 :args [grp])))))))
+
+(defn- wrap-dec
+  "Decrements x until it reaches 0, then increments from n."
+  [n x]
+  (cond
+    (zero? x) (inc n)
+    (< n x)   (inc x)
+    :else     (dec x)))
+
+;; check :max-dynamic-uniform-buffers-per-pipeline-layout
+;; check :max-dynamic-storage-buffers-per-pipeline-layout
 
 (defm deflayout
   [sym & groups]
-  ;; how is this different from group?
-
-  ;; no layout #
-  ;; bind # tracking is the same, except on defgroup rather than def*bindings
-  ;; - same inline gpu/reg-resource in layout
-  )
+  (if (empty? groups)
+    (emit-node :sym sym :kind :layout :wgsl false
+               :hash (hash groups)
+               :deps []
+               :args [nil])
+    (let [limit (:max-bind-groups gpu/limits)]
+      (parse-bind ::group (resolve-binds &env groups)
+                  (dec limit) (partial wrap-dec limit) vector
+                  (fn [deps binds]
+                    (loop [bind 0
+                           out  () ; inline defs have been bound, do deps here
+                           grps (->> (filter ::inline deps)
+                                     (map-indexed #(assoc %2 ::group (nth binds %1)))
+                                     (concat (remove ::inline deps))
+                                     (sort-by ::group))]
+                      (if (not-empty grps)
+                        ;; Splice in `null` group slots.
+                        (let [node (first grps)
+                              use? (= bind (::group node))]
+                          (recur (inc bind)
+                                 (conj out (and use? node))
+                                 (if use? (next grps) grps)))
+                        ;; Emit groups if different from deps.
+                        (let [uuids (map ::uuid (reverse out))
+                              deps' (filter some? uuids)]
+                          (emit-node :sym  sym :kind :layout :wgsl false
+                                     :hash (hash groups)
+                                     :deps deps'
+                                     :args (if (= uuids deps')
+                                             [nil]
+                                             [`(cljs.core/array ~@uuids)]))))))))))
 
 
 ;;; Shader Pipelines - Runtime Execution State
