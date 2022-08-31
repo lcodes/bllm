@@ -144,6 +144,39 @@
 ;;; Specification - Generated API mirroring the WebGPU interface definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; TODO encode base type, row/col counts directly in enumerated value bits
+(defenum prim-type
+  "Predefined types available in WGSL."
+  {:repr :string}
+  u32    :u32
+  i32    :i32
+  f32    :f32 ; max index of texture base type
+  f16    :f16 ; requires "enable f16;"
+  bool   :bool
+  vec2   :vec2<f32>
+  vec3   :vec3<f32>
+  vec4   :vec4<f32>
+  bvec2  :vec2<bool>
+  bvec3  :vec3<bool>
+  bvec4  :vec4<bool>
+  uvec2  :vec2<u32>
+  uvec3  :vec3<u32>
+  uvec4  :vec4<u32>
+  ivec2  :vec2<i32>
+  ivec3  :vec3<i32>
+  ivec4  :vec4<i32>
+  mat2   :mat2x2<f32>
+  mat3   :mat3x3<f32>
+  mat4   :mat4x4<f32>
+  mat2x3 :mat2x3<f32>
+  mat2x4 :mat2x4<f32>
+  mat3x2 :mat3x2<f32>
+  mat3x4 :mat3x4<f32>
+  mat4x2 :mat4x2<f32>
+  mat4x3 :mat4x3<f32>
+  ;; TODO f16 matrices
+  )
+
 (defflag buffer-usage
   "Compile-time constants equivalent to the runtime `js/GPUBufferUsage`."
   {:suffix -buffer}
@@ -296,9 +329,9 @@
   view-1d
   view-2d
   view-2d-array
+  view-3d
   view-cube
-  view-cube-array
-  view-3d)
+  view-cube-array)
 
 (defenum texture-aspect
   {:repr :string}

@@ -72,11 +72,11 @@
 
 (defn- emit-bind [sym tag args set ctor]
   (let [desc (symbol (str sym "-array"))
-        tmp  (gensym "entry")
+        tmp  (with-meta (gensym "entry") {:tag tag})
         idx  (first args)]
     `(do (def ~(with-meta desc {:private true})
            (cljs.core/array))
-         (defn ~(with-meta sym {:tag tag}) ~args
+         (defn ~sym ~args
            (if-let [~tmp (aget ~desc ~idx)]
              (do ~@(set tmp)
                  ~tmp)
@@ -94,8 +94,6 @@
                (mapv first fields)
                #(emit-setters % (next fields))
                #(emit-object ((if index? next identity) param-specs)))))
-
-#_(name->tag sym "Layout")
 
 (defm ^:private defbind-layout
   [sym & param-specs]

@@ -58,7 +58,7 @@
   [{:keys [name type offset]}]
   (list 'bllm.wgsl/field
     (util/kebab->camel  name)
-    (util/keyword->wgsl type)
+    (util/keyword->gpu type)
     offset))
 
 (defn- emit-struct
@@ -167,7 +167,7 @@
           :kind ~kind
           :deps ~(when (has-deps? (util/sym kind))
                   `(:deps ~gmeta []))
-          :args (map util/keyword->wgsl
+          :args (map util/keyword->gpu
                      [~@props
                       ~@(when (not-empty body)
                           (if-let [ks (:keys attrs)]
@@ -259,7 +259,7 @@
   `(do (assert ~sym ~(str "Param " sym " is required"))
        ~sym))
 
-(defn- optional-prop [sym default]
+  (defn- optional-prop [sym default]
   `(or ~sym ~(util/keyword->gpu default)))
 
 (defn- expand-prop [f val]
@@ -358,8 +358,8 @@
   [sym stage dir type & {:as opts}]
   (let [ident (or (:name opts) (util/kebab->snake sym))]
     (with-meta {:name  ident
-                :stage (util/keyword->gpu  stage "stage-")
-                :type  (util/keyword->wgsl type)
+                :stage (util/keyword->gpu stage "stage-")
+                :type  (util/keyword->gpu type)
                 :dir   (builtin-io dir true false)}
       {::name  ident
        ::type  type
@@ -381,24 +381,159 @@
 ;;; Resources - Buffer Views, Texture Views & Samplers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- binding-type* [sym types]
+  (util/keyword->gpu
+   (or (first (filter (meta sym) types))
+       (first types))))
+
+(def ^:private binding-type (memoize binding-type*))
+
 (defnode defstruct
   "Aggregate type definition."
   [sym & fields]
   (emit-struct &env sym (meta/parse-struct &env fields)))
 
-;; TODO separate struct from instance identifiers (same namespace in WGSL -> compile errors)
-(defnode defuniform
+(defnode defbuffer
+  {:keys [:type :info]}
   [sym group bind & fields]
-  (emit-struct &env sym (meta/parse-struct &env fields)))
-
-(defnode defstorage
-  [sym group bind type access])
+  {:type (binding-type sym [:uniform :storage :read-only-storage])
+   :info (emit-struct &env sym (meta/parse-struct &env fields))})
 
 (defnode deftexture
-  [sym group bind tex type])
+  [sym group bind view type]
+  (binding-type sym [:float :unfilterable-float :depth :sint :uint]))
+
+(defnode defstorage
+  [sym group bind type access]
+  (binding-type sym [:write-only]))
 
 (defnode defsampler
-  [sym group bind])
+  [sym group bind]
+  (binding-type sym [:filtering :non-filtering :comparison]))
+
+
+;;; Resource Groups
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- resolve-bind-var [env x]
+  (if-not (symbol? x)
+    x
+    (ana/resolve-existing-var env x)))
+
+(defn- resolve-binds [env args]
+  (map (partial resolve-bind-var env) args))
+
+(defn- parse-bind [bind-key vars bind-first bind-next inline emit]
+  (loop [vars vars
+         deps ()
+         defs ()
+         used 0]
+    (if vars
+      ;; 1 - Run through vars, separate inline defs from refs, compute bind mask.
+      (let [arg (first vars)
+            def (when (seq? arg) arg)
+            dep (if-not def arg {::uuid (gpu-id (second def)) ::inline true})]
+        (recur (next vars)
+               (conj deps dep)
+               (if def (conj defs def) defs)
+               (long (if-let [bind (get dep bind-key)]
+                       (do (when (bit-test used bind)
+                             (throw (ex-info "Binding already in use"
+                                             {:used used :dep dep :arg arg})))
+                           (bit-set used bind))
+                       used))))
+      ;; 2 - Bind inline defs.
+      (loop [bind bind-first
+             used used
+             defs (reverse defs)
+             gen  ()
+             out  ()]
+        (if (not-empty defs)
+          (let [used? (bit-test used bind)]
+            (recur (bind-next bind)
+                   (long (bit-set used bind))
+                   (if used? defs (next defs))
+                   (if used? gen  (conj gen bind))
+                   (if used? out  (conj out (util/splice-defm (inline bind)
+                                                              (first defs))))))
+          ;; 3 - Code generation.
+          `(do ~@(reverse out)
+               ~(emit (reverse deps)
+                      (reverse gen))))))))
+
+(defn- empty-defgroup []
+  (throw (Exception. "Empty defgroup")))
+
+(defm defgroup
+  [sym & binds]
+  (if (empty? binds)
+    (empty-defgroup)
+    (let [vars (resolve-binds &env binds)
+          arg  (first vars)
+          grp  (cond (number? arg) arg
+                     (:const  arg) (read-const arg))
+          vars (if grp (next vars) vars)
+          grps (filter some? (map ::group vars))
+          grp  (or grp (first grps)
+                   (throw (Exception. "Missing group number")))]
+      (gpu/check-limit grp :max-bind-groups)
+      (when (and (zero? grp) (not (:override (meta sym))))
+        (throw (Exception. "Bind group 0 requires ^:override")))
+      (if (empty? vars)
+        (empty-defgroup)
+        (parse-bind ::bind vars 0 inc #(vector grp %)
+                    (fn [deps _]
+                      (emit-node :sym  (vary-meta sym assoc ::group grp)
+                                 :kind :group
+                                 :wgsl false
+                                 :hash (hash binds)
+                                 :deps (map ::uuid deps)
+                                 :args [grp])))))))
+
+(defn- wrap-dec
+  "Decrements x until it reaches 0, then increments from n."
+  [n x]
+  (cond
+    (zero? x) (inc n)
+    (< n x)   (inc x)
+    :else     (dec x)))
+
+;; check :max-dynamic-uniform-buffers-per-pipeline-layout
+;; check :max-dynamic-storage-buffers-per-pipeline-layout
+
+(defm deflayout
+  [sym & groups]
+  (if (empty? groups)
+    (emit-node :sym sym :kind :layout :wgsl false
+               :hash (hash groups)
+               :deps []
+               :args [nil])
+    (let [limit (:max-bind-groups gpu/limits)]
+      (parse-bind ::group (resolve-binds &env groups)
+                  (dec limit) (partial wrap-dec limit) vector
+                  (fn [deps binds]
+                    (loop [bind 0
+                           out  () ; inline defs have been bound, do deps here
+                           grps (->> (filter ::inline deps)
+                                     (map-indexed #(assoc %2 ::group (nth binds %1)))
+                                     (concat (remove ::inline deps))
+                                     (sort-by ::group))]
+                      (if (not-empty grps)
+                        ;; Splice in `null` group slots.
+                        (let [node (first grps)
+                              use? (= bind (::group node))]
+                          (recur (inc bind)
+                                 (conj out (and use? node))
+                                 (if use? (next grps) grps)))
+                        ;; Emit groups if different from deps.
+                        (let [uuids (map ::uuid (reverse out))
+                              deps' (filter some? uuids)]
+                          (emit-node :sym  sym :kind :layout :wgsl false
+                                     :hash (hash groups)
+                                     :deps deps'
+                                     :args (if (= uuids deps')
+                                             [nil]
+                                             [`(cljs.core/array ~@uuids)]))))))))))
 
 
 ;;; WGSL Expanders - Support for infix and macro special forms
@@ -899,12 +1034,12 @@
                     ;; TODO type inference on let bindings -> ret
                     (with-deps deps (gpu-hash args|ret body)
                       {:wgsl wgsl
-                       :ret  (util/keyword->wgsl (or ret :f32)) ;; TODO default to type inference
+                       :ret  (util/keyword->gpu (or ret :f32)) ;; TODO default to type inference
                        :args `(cljs.core/array
                                ~@(for [arg args]
                                    `(bllm.wgsl/argument
                                      ~(::expr arg)
-                                     ~(util/keyword->wgsl (:tag arg)))))}))
+                                     ~(util/keyword->gpu (:tag arg)))))}))
          (compile-fn env (if ret (next body) body))
          (binding [*return* :ret]))))
 
@@ -969,7 +1104,6 @@
                       (with-deps (gpu-hash x y z body)
                         {:in (gen-io ids) :x x :y y :z z :wgsl wgsl}))))))
 
-
 ;; TODO step between compile and link -> validation!
 (defn- compile-io [stage in out env body]
   ;; TODO check :max-inter-stage-shader-components/variables
@@ -999,130 +1133,6 @@
   [sym & body]
   ;; TODO check :max-color-attachments
   (compile-io :fragment :interpolant :draw-target &env body))
-
-
-;;; Resource Groups
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn- resolve-bind-var [env x]
-  (if-not (symbol? x)
-    x
-    (ana/resolve-existing-var env x)))
-
-(defn- resolve-binds [env args]
-  (map (partial resolve-bind-var env) args))
-
-(defn- parse-bind [bind-key vars bind-first bind-next inline emit]
-  (loop [vars vars
-         deps ()
-         defs ()
-         used 0]
-    (if vars
-      ;; 1 - Run through vars, separate inline defs from refs, compute bind mask.
-      (let [arg (first vars)
-            def (when (seq? arg) arg)
-            dep (if-not def arg {::uuid (gpu-id (second def)) ::inline true})]
-        (recur (next vars)
-               (conj deps dep)
-               (if def (conj defs def) defs)
-               (long (if-let [bind (get dep bind-key)]
-                       (do (when (bit-test used bind)
-                             (throw (ex-info "Binding already in use"
-                                             {:used used :dep dep :arg arg})))
-                           (bit-set used bind))
-                       used))))
-      ;; 2 - Bind inline defs.
-      (loop [bind bind-first
-             used used
-             defs (reverse defs)
-             gen  ()
-             out  ()]
-        (if (not-empty defs)
-          (let [used? (bit-test used bind)]
-            (recur (bind-next bind)
-                   (long (bit-set used bind))
-                   (if used? defs (next defs))
-                   (if used? gen  (conj gen bind))
-                   (if used? out  (conj out (util/splice-defm (inline bind)
-                                                              (first defs))))))
-          ;; 3 - Code generation.
-          `(do ~@(reverse out)
-               ~(emit (reverse deps)
-                      (reverse gen))))))))
-
-(defn- empty-defgroup []
-  (throw (Exception. "Empty defgroup")))
-
-(defm defgroup
-  [sym & binds]
-  (if (empty? binds)
-    (empty-defgroup)
-    (let [vars (resolve-binds &env binds)
-          arg  (first vars)
-          grp  (cond (number? arg) arg
-                     (:const  arg) (read-const arg))
-          vars (if grp (next vars) vars)
-          grps (filter some? (map ::group vars))
-          grp  (or grp (first grps)
-                   (throw (Exception. "Missing group number")))]
-      (gpu/check-limit grp :max-bind-groups)
-      (when (and (zero? grp) (not (:override (meta sym))))
-        (throw (Exception. "Bind group 0 requires ^:override")))
-      (if (empty? vars)
-        (empty-defgroup)
-        (parse-bind ::bind vars 0 inc #(vector grp %)
-                    (fn [deps _]
-                      (emit-node :sym  (vary-meta sym assoc ::group grp)
-                                 :kind :group
-                                 :wgsl false
-                                 :hash (hash binds)
-                                 :deps (map ::uuid deps)
-                                 :args [grp])))))))
-
-(defn- wrap-dec
-  "Decrements x until it reaches 0, then increments from n."
-  [n x]
-  (cond
-    (zero? x) (inc n)
-    (< n x)   (inc x)
-    :else     (dec x)))
-
-;; check :max-dynamic-uniform-buffers-per-pipeline-layout
-;; check :max-dynamic-storage-buffers-per-pipeline-layout
-
-(defm deflayout
-  [sym & groups]
-  (if (empty? groups)
-    (emit-node :sym sym :kind :layout :wgsl false
-               :hash (hash groups)
-               :deps []
-               :args [nil])
-    (let [limit (:max-bind-groups gpu/limits)]
-      (parse-bind ::group (resolve-binds &env groups)
-                  (dec limit) (partial wrap-dec limit) vector
-                  (fn [deps binds]
-                    (loop [bind 0
-                           out  () ; inline defs have been bound, do deps here
-                           grps (->> (filter ::inline deps)
-                                     (map-indexed #(assoc %2 ::group (nth binds %1)))
-                                     (concat (remove ::inline deps))
-                                     (sort-by ::group))]
-                      (if (not-empty grps)
-                        ;; Splice in `null` group slots.
-                        (let [node (first grps)
-                              use? (= bind (::group node))]
-                          (recur (inc bind)
-                                 (conj out (and use? node))
-                                 (if use? (next grps) grps)))
-                        ;; Emit groups if different from deps.
-                        (let [uuids (map ::uuid (reverse out))
-                              deps' (filter some? uuids)]
-                          (emit-node :sym  sym :kind :layout :wgsl false
-                                     :hash (hash groups)
-                                     :deps deps'
-                                     :args (if (= uuids deps')
-                                             [nil]
-                                             [`(cljs.core/array ~@uuids)]))))))))))
 
 
 ;;; Shader Pipelines - Runtime Execution State

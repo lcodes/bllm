@@ -29,8 +29,7 @@
 (wgsl/defgroup ^:override frame-data
   "Values uploaded once per frame to the GPU."
   FRAME
-  (wgsl/defuniform frame
-    ""
+  (wgsl/defbuffer frame
     [time       :vec4]
     [sin-time   :vec4]
     [delta-time :vec4]
@@ -48,18 +47,18 @@
   frame-data
   (wgsl/defgroup test-group-a
     (wgsl/defsampler test-sampler-b)
-    (wgsl/deftexture test-tex :tex-2d :f32)))
+    (wgsl/deftexture test-tex :view-2d :f32)))
 
 (util/dump
  (wgsl/deflayout empty-layout "Simplest pipeline layout: doesn't contain any bind groups."))
 
-(wgsl/defuniform screen
+(wgsl/defbuffer screen
   PASS 3
   [proj-params :vec4]
   [params      :vec4]
   [z-buffer    :vec4])
 
-(wgsl/defuniform camera
+(wgsl/defbuffer camera
   ""
   PASS 0
   [view          :mat4]
@@ -72,7 +71,7 @@
 
 (wgsl/definterpolant io-texcoord 0 :vec2)
 
-(wgsl/defuniform hello EFFECT 0
+(wgsl/defbuffer hello EFFECT 0
   [switch :bool])
 
 (wgsl/defun branch-test :vec3 [a :vec3 b :vec3]
@@ -133,7 +132,7 @@
 
 (wgsl/definterpolant io-texcoord-3d 0 :vec3)
 
-(wgsl/deftexture tex-skybox EFFECT 0 :tex-cube :f32)
+(wgsl/deftexture tex-skybox EFFECT 0 :view-cube :f32)
 
 (wgsl/defvertex vs-demo
   (position = (vec4 local-position 1)))
@@ -254,9 +253,9 @@
   [ao             :f32]
   [occlusion      :f32])
 
-(wgsl/deftexture irradiance-tex PASS 1 :tex-cube :f32)
-(wgsl/deftexture prefilter-tex  PASS 2 :tex-cube :f32)
-(wgsl/deftexture brdf-lut       PASS 3 :tex-3d   :f32)
+(wgsl/deftexture irradiance-tex PASS 1 :view-cube :f32)
+(wgsl/deftexture prefilter-tex  PASS 2 :view-cube :f32)
+(wgsl/deftexture brdf-lut       PASS 3 :view-3d   :f32)
 
 (wgsl/defun lighting :vec3 [data Surface]
   (let [light-pos (vec3 0 0 0)
@@ -312,15 +311,15 @@
         ambient (ss * pf.rgb + (ms + diffuse) * irradiance.rgb)]
     (lo + ambient)))
 
-(wgsl/defun window-depth :f32 [depth :tex-2d coord :vec2]
+(wgsl/defun window-depth :f32 [depth :view-2d coord :vec2]
   (.r (texture-load depth coord 0)))
 
-(wgsl/deftexture gbuffer-albedo     PASS 4  :tex-2d :f32)
-(wgsl/deftexture gbuffer-normal     PASS 6  :tex-2d :f32)
-(wgsl/deftexture gbuffer-emissive   PASS 7  :tex-2d :f32)
-(wgsl/deftexture gbuffer-properties PASS 8  :tex-2d :f32)
-(wgsl/deftexture gbuffer-custom     PASS 9  :tex-2d :f32)
-(wgsl/deftexture gbuffer-depth      PASS 10 :tex-2d :f32)
+(wgsl/deftexture gbuffer-albedo     PASS 4  :view-2d :f32)
+(wgsl/deftexture gbuffer-normal     PASS 6  :view-2d :f32)
+(wgsl/deftexture gbuffer-emissive   PASS 7  :view-2d :f32)
+(wgsl/deftexture gbuffer-properties PASS 8  :view-2d :f32)
+(wgsl/deftexture gbuffer-custom     PASS 9  :view-2d :f32)
+(wgsl/deftexture gbuffer-depth      PASS 10 :view-2d :f32)
 
 (wgsl/defkernel lighting-cs [8 8]
   ;; TODO from material function
@@ -332,7 +331,7 @@
     #_(let [depth ()])
     (lighting data)))
 
-(wgsl/defuniform pp
+(wgsl/defbuffer pp
   EFFECT 0
   [scatter  :f32]
   [gamma    :f32]
@@ -364,8 +363,8 @@
   (wgsl/defstorage reusable 2 0)
   (wgsl/defgroup effect-grp 2
     reusable
-    (wgsl/deftexture screen-tex :tex-2d) ; bound to (reusable.bind + 1)
-    (wgsl/defuniform screen ; bound to (screen-tex.bind + 1)
+    (wgsl/deftexture screen-tex :view-2d) ; bound to (reusable.bind + 1)
+    (wgsl/defbuffer screen ; bound to (screen-tex.bind + 1)
       [params :vec4]))
   (wgsl/deflayout l
     ;; groups 0 & 1 are null, because effect-grp starts at 2
@@ -375,11 +374,11 @@
   )
 ;;
 
-(wgsl/deftexture screen-tex  EFFECT 0 :tex-2d :f32)
-(wgsl/deftexture input-tex   EFFECT 0 :tex-2d :f32)
-(wgsl/deftexture bloom-tex   EFFECT 1 :tex-2d :f32)
-(wgsl/deftexture grain-tex   EFFECT 2 :tex-2d :f32)
-(wgsl/deftexture grading-lut EFFECT 3 :tex-3d :f32)
+(wgsl/deftexture screen-tex  EFFECT 0 :view-2d :f32)
+(wgsl/deftexture input-tex   EFFECT 0 :view-2d :f32)
+(wgsl/deftexture bloom-tex   EFFECT 1 :view-2d :f32)
+(wgsl/deftexture grain-tex   EFFECT 2 :view-2d :f32)
+(wgsl/deftexture grading-lut EFFECT 3 :view-3d :f32)
 
 (wgsl/defun ^:feature distort-uv [uv :vec2]
   (let [center pp.dist1.xy ; TODO don't want to manually pack/unpack such things
@@ -436,7 +435,7 @@
         l (mix 1 (1 - (sqrt (luminance c))) response)]
     (c + c * g * intensity * l)))
 
-(wgsl/deftexture cell-out MODEL 0 :tex-2d :f32)
+(wgsl/deftexture cell-out MODEL 0 :view-2d :f32)
 
 (wgsl/defkernel post-process [8 8]
   (let [uv (distort-uv global-invocation-id.xy)]
@@ -591,7 +590,7 @@
 
   (wgsl/defstorage s-mydata grp-pass 1 :vec4 :r)
 
-  (wgsl/deftexture tex-albedo grp-effect 0 :tex-2d :f32)
+  (wgsl/deftexture tex-albedo grp-effect 0 :view-2d :f32)
 
   (wgsl/defsampler sam-default grp-frame 1)
   (wgsl/defsampler sam-linear-mip grp-frame 2)

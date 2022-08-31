@@ -31,9 +31,9 @@
   Interpolant
   GeneratedIO
   ;; Resources Definitions
-  Uniform
-  Storage
+  Buffer
   Texture
+  Storage
   Sampler
   ;; Code Definitions
   Struct
@@ -52,67 +52,37 @@
   Render
   Compute)
 
-;; TODO encode base type, row/col counts directly in enumerated value bits
-(defenum gpu-prim-type
-  "Predefined types available in WGSL."
-  {:repr :string}
-  u32    :u32
-  i32    :i32
-  f32    :f32 ; max index of texture base type
-  f16    :f16 ; requires "enable f16;"
-  bool   :bool
-  vec2   :vec2<f32>
-  vec3   :vec3<f32>
-  vec4   :vec4<f32>
-  bvec2  :vec2<bool>
-  bvec3  :vec3<bool>
-  bvec4  :vec4<bool>
-  uvec2  :vec2<u32>
-  uvec3  :vec3<u32>
-  uvec4  :vec4<u32>
-  ivec2  :vec2<i32>
-  ivec3  :vec3<i32>
-  ivec4  :vec4<i32>
-  mat2   :mat2x2<f32>
-  mat3   :mat3x3<f32>
-  mat4   :mat4x4<f32>
-  mat2x3 :mat2x3<f32>
-  mat2x4 :mat2x4<f32>
-  mat3x2 :mat3x2<f32>
-  mat3x4 :mat3x4<f32>
-  mat4x2 :mat4x2<f32>
-  mat4x3 :mat4x3<f32>
-  ;; TODO f16 matrices
-  )
-
 (defn- gpu-type [node]
   (if (number? node.type)
-    (gpu-prim-type node.type)
+    (gpu/prim-type node.type)
     node.name))
 
 (defn- gpu-field-type [type-or-node]
   (if (number? type-or-node)
-    (gpu-prim-type type-or-node)
+    (gpu/prim-type type-or-node)
     type-or-node.name))
 
 (defenum storage-address-space
   "Whether a storage binding is immutable (default) or mutable."
   {:repr :string}
-  r  "<storage,read>"
+  r  "<storage>"
   rw "<storage,read_write>")
 
-(defenum gpu-texture-type
-  {:repr :string}
-  tex-1d         :texture_1d
-  tex-2d         :texture_2d
-  tex-2d-array   :texture_2d_array
-  tex-3d         :texture_3d
-  tex-cube       :texture_cube
-  tex-cube-array :texture_cube_array)
-;; TODO multisampled, external, storage, depth textures
+(defn texture-suffix [view]
+  (case view
+    gpu/view-1d         "1d"
+    gpu/view-2d         "2d"
+    gpu/view-2d-array   "2d_array"
+    gpu/view-3d         "3d"
+    gpu/view-cube       "cube"
+    gpu/view-cube-array "cube_array"))
 
-(defn gpu-full-texture-type [node]
-  (str (gpu-texture-type node.tex) \< (gpu-prim-type node.type) \>))
+(defn gpu-texture-type [node]
+  (let [ts (texture-suffix node.view)
+        ms (when node.multisampled "multisampled_")]
+    (if (= node.sample gpu/depth)
+      (str "texture_depth_" ms ts)
+      (str "texture_"       ms ts \< (gpu/prim-type node.type) \>))))
 
 (defn- io-bind [slot]
   (if (neg? slot)
@@ -133,7 +103,7 @@
 
 (defn- emit-io [node]
   (str "@location(" (io-bind node.bind) ") "
-       node.name " : " (gpu-prim-type node.type)))
+       node.name " : " (gpu/prim-type node.type)))
 
 (defn- emit-bind [node address-space type]
   (str "@group(" node.group ") @binding(" node.bind ") var"
@@ -188,7 +158,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- emit-builtin [node]
-  (str "@builtin(" node.name ") " node.name " : " (gpu-prim-type node.type)))
+  (str "@builtin(" node.name ") " node.name " : " (gpu/prim-type node.type)))
 
 (defwgsl builtin [stage dir type] emit-builtin)
 (defwgsl vertex-attr [bind type] emit-io)
@@ -196,20 +166,27 @@
 (defwgsl interpolant [bind type] emit-io)
 
 (defn- uniform-type [t]
-  (str (gpu-type t) "_t"))
+  (str t.name "_t"))
 
-(defwgsl uniform [group bind info]
+;;      dynamic offset
+;;      min-binding-size -> ::size
+(defwgsl buffer [group bind type info]
   (emit-struct "_t") ; TODO support primitive uniforms?
-  (emit-var "<uniform>" uniform-type))
+  (emit-var "<uniform>" uniform-type)) ; TODO storage
 
+;; multisampled
+(defwgsl texture [group bind view type sample]
+  (emit-var "" gpu-texture-type))
+
+;; view-dimension
+;; storage: texel format, access (read, write, read_write)
 (defwgsl storage [group bind type access]
   (emit-var (storage-address-space access) gpu-type))
 
-(defwgsl texture [group bind tex type]
-  (emit-var "" gpu-full-texture-type))
-
-(defwgsl sampler [group bind]
-  (emit-bind "" "sampler"))
+(defwgsl sampler [group bind type]
+  (emit-bind "" (if (= type gpu/comparison)
+                  "sampler_comparison"
+                  "sampler")))
 
 (defwgsl struct [info] (emit-struct ""))
 
