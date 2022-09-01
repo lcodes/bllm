@@ -13,12 +13,17 @@
 ;; - right now just porting old WebGL2 code, need to push that wgsl codegen
 ;; - plan is to get working pipelines, gpu resources, then simplify, then move
 
+
+
 (wgsl/defconst E    2.7182818284590452)
 (wgsl/defconst PI   3.1415926535897932)
 (wgsl/defconst PI-2 1.5707963267948966)
 (wgsl/defconst PI-4 0.7853981633974483)
 (wgsl/defconst PI*2 6.2831853071795864)
 (wgsl/defconst EPSILON 1e-10)
+
+(wgsl/defstruct Test
+  [hello :u32])
 
 (meta/defenum bind-group
   FRAME
@@ -38,19 +43,19 @@
   (wgsl/defsampler linear-mip)
   (wgsl/defsampler linear-repeat))
 
+;; linear-mip.bind
+(comment (js/console.log linear-mip))
+
 (wgsl/defgroup test-data
   EFFECT
   (wgsl/defsampler albedo-sampler))
 
 (wgsl/deflayout test-layout
-  test-data
   frame-data
+  #_
   (wgsl/defgroup test-group-a
     (wgsl/defsampler test-sampler-b)
     (wgsl/deftexture test-tex :view-2d :f32)))
-
-(util/dump
- (wgsl/deflayout empty-layout "Simplest pipeline layout: doesn't contain any bind groups."))
 
 (wgsl/defbuffer screen
   PASS 3

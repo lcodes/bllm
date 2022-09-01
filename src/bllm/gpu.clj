@@ -22,6 +22,7 @@
   (let [ident  (util/kebab->pascal ctor-name)
         attrs  (meta ctor-name)
         fields (concat extra-fields param-specs)
+        setter (remove (comp :static meta) fields)
         create (symbol (str (:create attrs "create") ident))]
     (util/wrap-do
      ;; Emit a reusable descriptor `js/Object`. Only used by the next fn.
@@ -34,8 +35,8 @@
                              (set-field default tag)
                              'js/undefined)]))))
      ;; Emit a function to fill the descriptor and create a `gpu/Object`.
-     `(defn ~ctor-name ~(mapv first (remove (comp :static meta) fields))
-        ~@(emit-setters desc-sym fields)
+     `(defn ~ctor-name ~(mapv first setter)
+        ~@(emit-setters desc-sym setter)
         ~(if-not create?
            'js/undefined
            `(. ~'device ~create ~desc-sym))))))
@@ -95,7 +96,7 @@
                #(emit-setters % (next fields))
                #(emit-object ((if index? next identity) param-specs)))))
 
-(defm ^:private defbind-layout
+(defm ^:private deflayout
   [sym & param-specs]
   (let [extra '[[binding    :i32]
                 [visibility :u32]]
@@ -132,8 +133,8 @@
   `(do (bllm.util/def1 ~sym js/undefined)
        (bllm.gpu/register
         ~(hash sym) ~(hash init)
-        (fn get [] ~sym) ; NOTE only required in development
-        (fn set [] (set! ~sym ~init)))))
+        (fn ~'get [] ~sym) ; NOTE only required in development
+        (fn ~'set [] (set! ~sym ~init)))))
 
 ;; TODO overridable compile-time "min requirements"
 ;; - validate only overridden values against device

@@ -12,7 +12,7 @@
   And some caveats:
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
   (:refer-clojure :exclude [float keep max min repeat replace])
-  (:require-macros [bllm.gpu :refer [defbind defbind-layout defgpu defstage]])
+  (:require-macros [bllm.gpu :refer [defbind deflayout defgpu defstage defres]])
   (:require [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
 
@@ -30,32 +30,36 @@
   "WebGPU logical device. Used to create all GPU objects and submit commands."
   js/undefined)
 
-(def1 ^:private resources
-  "An array of system resources, in declaration order, to maintain alongside the
-  GPU `device`. This allows for both late initialization and re-initialization
-  in case the device needs to be recreated or the resource declaration modified.
-
-  Prefer the `defres` macro to declare system resources."
-  #js [])
-
 (def1 preferred-format
   "The `texture-format` detected to be most efficient for presented surfaces."
   nil)
 
+(def1 ^:private resources
+  "An array of system resources, in declaration order, to maintain alongside the
+  GPU `device`. This allows for both late initialization and re-initialization
+  in case the device needs to be recreated or the resource definition changed.
+
+  Prefer the `defres` macro to declare system resources."
+  #js [])
+
 (defn- init-resources []
-  ;; TODO will contain bind group layouts, shader pipelines, textures, buffers,
-  )
+  (util/doarray [res resources]
+    (res.set)))
 
 (defn- try-init-resource [res]
-  (when-not (res.get)
+  (when (and device (nil? (res.get)))
     (res.set)))
+
+(defn try-destroy [^js/GPUBaseObject obj]
+  (when (and obj (.-destroy obj))
+    (.destroy obj)))
 
 (defn register [id hash get set]
   (if-let [res (.find resources (fn [res] (= res.id id)))]
     (when (not= hash res.hash) ; Re-registering with different ctor.
       (set! res.hash hash)
-      (set! res.set set)
-      ;; TODO try destroy
+      (set! res.set  set)
+      (try-destroy (res.get))
       (try-init-resource res))
     (let [res #js {:id   id
                    :hash hash
@@ -409,7 +413,7 @@
   storage
   read-only-storage)
 
-(defbind-layout bind-buffer
+(deflayout bind-buffer
   [type             buffer-binding-type uniform]
   [hasDynamicOffset :bool               false]
   [minBindingSize   :u64                0])
@@ -420,7 +424,7 @@
   non-filtering
   comparison)
 
-(defbind-layout bind-sampler
+(deflayout bind-sampler
   [type sampler-binding-type filtering])
 
 (defenum texture-sample-type
@@ -431,7 +435,7 @@
   sint
   uint)
 
-(defbind-layout bind-texture
+(deflayout bind-texture
   [sampleType    texture-sample-type    float]
   [viewDimension texture-view-dimension view-2d]
   [multisampled  :bool                  false])
@@ -440,12 +444,12 @@
   {:repr :string}
   write-only)
 
-(defbind-layout bind-storage-texture
+(deflayout bind-storage-texture
   [access        storage-texture-access write-only]
   [format        texture-format]
   [viewDimension texture-view-dimension view-2d])
 
-(defbind-layout bind-external-texture)
+(deflayout bind-external-texture)
 
 (defgpu bind-group-layout
   [entries [::bind-group-layout-entry]])

@@ -8,6 +8,9 @@
   (:refer-clojure :exclude [abs max min])
   (:require-macros [bllm.base :refer [defctor deflib defmath]]))
 
+(set! *warn-on-infer* true)
+
+
 (defctor f32 []) ; really a cast
 
 ;; TODO infer vec2<f32> from (vec2 (f32 expr) (f32 expr)) or (vec2 (vec2<f32> expr))

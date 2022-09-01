@@ -158,7 +158,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- emit-builtin [node]
-  (str "@builtin(" node.name ") " node.name " : " (gpu/prim-type node.type)))
+  (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
 
 (defwgsl builtin [stage dir type] emit-builtin)
 (defwgsl vertex-attr [bind type] emit-io)
@@ -274,16 +274,50 @@
         (.set defs id io)
         io)))
 
+(defn- bind-group-layout [node]
+  (assert (= Group node.kind))
+  (let [^js/Array ids node.deps
+        entries (aget util/arrays (.-length ids))]
+    (util/doarray [id n ids]
+      (let [e (.get defs id)
+            b e.bind
+            v (bit-or gpu/stage-compute gpu/stage-vertex gpu/stage-fragment)] ; TODO visibility
+        (aset entries n
+              (case e.kind
+                Buffer  (gpu/bind-buffer  b v e.type false e.size) ; TODO dynamic
+                Texture (gpu/bind-texture b v e.sample e.view false) ; TODO multisample
+                Storage (gpu/bind-storage-texture b v e.access e.format e.view)
+                Sampler (gpu/bind-sampler b v e.type)))))
+    (gpu/bind-group-layout node.uuid entries)))
+
+(defn- pipeline-layout [node]
+  (assert (= Layout node.kind))
+  (let [^js/Array ids (or node.groups node.deps)
+        groups (aget util/arrays (.-length ids))]
+    (util/doarray [id n ids]
+      (aset groups n
+            (if (nil? id)
+              nil
+              (let [grp (.get defs id)] grp.gpu))))
+    (gpu/pipeline-layout node.uuid groups)))
+
+(defn- reg-gpu [^object node ctor]
+  (gpu/register node.uuid node.hash
+                (fn get []       (.-gpu node))
+                (fn set [] (set! (.-gpu node) (ctor node)))))
+
 (defn register
   "Registers a shader graph node definition."
   [node]
   ;; Old node
   (when-let [existing (.get defs node.uuid)]
-    (when (not= existing.hash node.hash)
-      (.add dirty-ids node.uuid)
-      (when-let [old-deps existing.deps]
-        (util/docoll [id old-deps]
-          (.delete (.get deps id) node.uuid)))))
+    (when (= existing.hash node.hash)
+      (util/return))
+    (gpu/try-destroy existing.gpu)
+    (.add dirty-ids node.uuid)
+    (when-let [old-deps existing.deps]
+      (util/docoll [id old-deps]
+        (.delete (.get deps id) node.uuid))))
   ;; New node
   (.set defs node.uuid node)
   (when-let [new-deps node.deps]
@@ -293,6 +327,10 @@
                 (.set deps id ids)
                 ids))
           (.add node.uuid))))
+  (case node.kind
+    Group  (reg-gpu node bind-group-layout)
+    Layout (reg-gpu node pipeline-layout)
+    nil)
   ;; Debug
   (js/console.log node)
   (when node.wgsl (js/console.log node.wgsl))

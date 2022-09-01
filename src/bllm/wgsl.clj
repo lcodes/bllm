@@ -334,8 +334,8 @@
 
 ;; TODO `defgroup` treatment: `defstream` for vertex buffers and `deftarget`?
 
-(defn- io-expr [prefix-fn m]
-  (assoc m ::expr (str \_ (prefix-fn m) \. (::name m))))
+(defn- io-expr [prefix-fn name-prefix m]
+  (assoc m ::expr (str \_ (prefix-fn m) \. name-prefix (::name m))))
 
 (defn- builtin-io [dir in out]
   (case dir
@@ -354,7 +354,7 @@
 
 (defnode defbuiltin
   {:keys [:name :stage :dir :type] :props false :wgsl false
-   :expr (partial io-expr builtin-prefix)}
+   :expr (partial io-expr builtin-prefix "_")}
   [sym stage dir type & {:as opts}]
   (let [ident (or (:name opts) (util/kebab->snake sym))]
     (with-meta {:name  ident
@@ -370,7 +370,7 @@
   "Render I/O nodes have a `bind` slot and a `type`."
   [node prefix]
   `(defnode ~node
-     {:expr (partial io-expr (constantly ~prefix))}
+     {:expr (partial io-expr (constantly ~prefix) "")}
      ~'[sym bind type]))
 
 (defio defvertex-attr "Defines an input to the vertex stage."         "in")
@@ -396,8 +396,10 @@
 (defnode defbuffer
   {:keys [:type :info]}
   [sym group bind & fields]
-  {:type (binding-type sym [:uniform :storage :read-only-storage])
-   :info (emit-struct &env sym (meta/parse-struct &env fields))})
+  (let [type (binding-type sym [:uniform :storage :read-only-storage])
+        info (emit-struct &env sym (meta/parse-struct &env fields))]
+    (with-meta {:type type :info info}
+      (meta info))))
 
 (defnode deftexture
   [sym group bind view type]
@@ -504,10 +506,7 @@
 (defm deflayout
   [sym & groups]
   (if (empty? groups)
-    (emit-node :sym sym :kind :layout :wgsl false
-               :hash (hash groups)
-               :deps []
-               :args [nil])
+    (throw (Exception. "Empty deflayout"))
     (let [limit (:max-bind-groups gpu/limits)]
       (parse-bind ::group (resolve-binds &env groups)
                   (dec limit) (partial wrap-dec limit) vector
@@ -1157,6 +1156,14 @@
 (defn- resolve-vars [env vars]
   (map (partial ana/resolve-existing-var env) vars))
 
+(defnode defcompute
+  {:wgsl false}
+  [sym & layout|stage]
+  (let [{:keys [layout compute]}
+        (group-by ::kind (resolve-vars &env layout|stage))]
+    (emit-pipeline (required-first layout)
+                   (required-first compute))))
+
 (defnode defrender
   {:wgsl false}
   [sym & layout|stages|states]
@@ -1170,11 +1177,3 @@
                    (optional-first multisample)
                    (optional-first depth))))
 ;; TODO fragment blends, match number of outputs in fragment stage (or 0, or 1 repeated blend)
-
-(defnode defcompute
-  {:wgsl false}
-  [sym & layout|stage]
-  (let [{:keys [layout compute]}
-        (group-by ::kind (resolve-vars &env layout|stage))]
-    (emit-pipeline (required-first layout)
-                   (required-first compute))))
