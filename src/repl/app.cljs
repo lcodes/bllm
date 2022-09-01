@@ -27,11 +27,11 @@
   []
   (disp/request-frame tick) ; TODO frame skipping?
   (try
-    (core/pre)
-    (demo/pre)
+    (core/pre-tick)
+    (demo/pre-tick)
     (core/tick)
-    (demo/post)
-    (core/post)
+    (demo/post-tick)
+    (core/post-tick)
     (catch :default e
       (error/exceptional-pause e (util/callback tick)))))
 

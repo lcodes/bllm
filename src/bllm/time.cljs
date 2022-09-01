@@ -5,7 +5,7 @@
 (def1 unscaled-now   0)
 (def1 unscaled-delta 0)
 
-(defn tick []
+(defn pre-tick []
   (let [time (js/performance.now)]
     (set! unscaled-delta (- time unscaled-now))
     (set! unscaled-now time))
@@ -13,7 +13,7 @@
   )
 
 (defn start []
-  (tick)) ; Ensures the first frame doesn't have a large delta.
+  (pre-tick)) ; Ensures the first frame doesn't have a large delta.
 
 (defn zero!
   "Resets global time to absolute zero."

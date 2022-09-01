@@ -46,13 +46,15 @@
 ;; linear-mip.bind
 (comment (js/console.log linear-mip))
 
+
+
 (wgsl/defgroup test-data
   EFFECT
   (wgsl/defsampler albedo-sampler))
 
 (wgsl/deflayout test-layout
   frame-data
-  #_
+  test-data
   (wgsl/defgroup test-group-a
     (wgsl/defsampler test-sampler-b)
     (wgsl/deftexture test-tex :view-2d :f32)))
@@ -789,7 +791,7 @@ fn demo_frag() -> @location(0) vec4<f32> {
                                    :loadOp  "clear"
                                    :storeOp "store"}]})
 
-(defn pre
+(defn pre-tick
   "Application logic executed before each simulation tick."
   []
   )
@@ -797,9 +799,9 @@ fn demo_frag() -> @location(0) vec4<f32> {
 (defn setup-sine []
   (js/Math.sin (* 0.00015 time/unscaled-now)))
 
-(defn post [])
+(defn post-tick [])
 #_
-(defn post
+(defn post-tick
   "Application logic executed after each simulation tick."
   []
 

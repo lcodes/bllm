@@ -280,7 +280,7 @@
   (let [n (if (= 3 (count binding))
             (second binding)
             (gensym "n"))]
-    `(let [a# ~(last binding)
+    `(let [^js/Array a# ~(last binding)
            ~n js/undefined]
        (~'js* "for (let ~{} = 0; ~{} !== ~{}.length; ~{}++) {" ~n ~n a# ~n)
        (let [~(first binding) (~'js* "~{}[~{}]" a# ~n)]
@@ -307,7 +307,8 @@
 
 (defmacro domap
   [[val-name key-name map-expr] & body]
-  `(.forEach ~map-expr (fn ~'domap [~val-name ~key-name] ~@body)))
+  `(let [^js/Map m# ~map-expr]
+    (.forEach m# (fn ~'domap [~val-name ~key-name] ~@body))))
 
 (defmacro doiter
   "No overhead `doseq` specialized to JavaScript's `Iterator` interface."

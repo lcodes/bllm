@@ -142,6 +142,7 @@
   (util/doarray [vp viewports]
     (resize-viewport vp)))
 
-(defn tick []
-
+(defn pre-tick []
+  ;; schedule resource creation on resizes from here
+  ;; - throttle resize requests to frame boundaries
   )

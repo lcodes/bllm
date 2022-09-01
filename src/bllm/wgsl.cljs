@@ -297,27 +297,39 @@
     (util/doarray [id n ids]
       (aset groups n
             (if (nil? id)
-              nil
+              gpu/empty-bind-group
               (let [grp (.get defs id)] grp.gpu))))
     (gpu/pipeline-layout node.uuid groups)))
 
+(defn- gpu-tier [kind]
+  (case kind
+    (Group) gpu/tier-group
+    (Layout
+     Kernel
+     Vertex
+     Pixel) gpu/tier-entry
+    (Compute
+     Render) gpu/tier-state
+    nil))
+
 (defn- reg-gpu [^object node ctor]
-  (gpu/register node.uuid node.hash
+  (gpu/register (gpu-tier node.kind) node.uuid node.hash
                 (fn get []       (.-gpu node))
                 (fn set [] (set! (.-gpu node) (ctor node)))))
 
 (defn register
   "Registers a shader graph node definition."
-  [node]
+  [^object node]
   ;; Old node
   (when-let [existing (.get defs node.uuid)]
-    (when (= existing.hash node.hash)
-      (util/return))
-    (gpu/try-destroy existing.gpu)
-    (.add dirty-ids node.uuid)
-    (when-let [old-deps existing.deps]
-      (util/docoll [id old-deps]
-        (.delete (.get deps id) node.uuid))))
+    (if (= existing.hash node.hash)
+      (when-let [gpu existing.gpu]
+        (set! (.-gpu node) gpu)) ; Move GPU state to new node.
+      (do (gpu/try-destroy node.gpu)
+          (.add dirty-ids node.uuid) ; Will also recreate dependent GPU states.
+          (when-let [old-deps existing.deps]
+            (util/docoll [id old-deps]
+              (.delete (.get deps id) node.uuid))))))
   ;; New node
   (.set defs node.uuid node)
   (when-let [new-deps node.deps]
@@ -360,12 +372,6 @@
       (build-graph g id))
     g))
 
-(defn- check-dirty [ids]
-  (util/docoll [id ids]
-    (some-> (.get deps id) (check-dirty))
-    (when (entry? (.get defs id)) ; TODO collect pipelines, not entries -> unused entries dont need to exist
-      (.add entry-ids id))))      ; - still want to ensure entry points compile at the REPL, use a dev switch?
-
 (defenum topo-mark
   ^:private TopoTemp
   ^:private TopoDone)
@@ -397,10 +403,22 @@
       (some->> node.out (.add io))))
   io)
 
-(defn tick []
+(defn- check-dirty [ids]
+  (util/docoll [id ids]
+    (some-> (.get deps id)
+            (check-dirty))
+    (let [node (.get defs id)]
+      (some-> (gpu-tier node)
+              (gpu/recreate id))
+      (when (entry? node)       ; TODO collect pipelines, not entries -> unused entries dont need to exist
+        (.add entry-ids id))))) ; - still want to ensure entry points compile at the REPL, use a dev switch?
+
+(defn pre-gpu []
   (when (pos? (.-size dirty-ids))
     (check-dirty dirty-ids)
-    (.clear dirty-ids))
+    (.clear dirty-ids)))
+
+(defn pre-tick []
   (when (pos? (.-size entry-ids))
     (let [g   (-> (to-module entry-ids)
                   (topo-sort util/temp-array))

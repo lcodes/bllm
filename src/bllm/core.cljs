@@ -26,13 +26,15 @@
    #js [(disp/start)
         (time/start)]))
 
-(defn pre
+(defn pre-tick
   "Ticks the input systems."
   []
-  (time/tick)
-  ;;(input/pre)
-  (disp/tick)
-  (wgsl/tick)
+  (time/pre-tick)
+  ;;(input/pre-tick)
+  (disp/pre-tick)
+  (wgsl/pre-gpu)
+  (gpu/pre-tick)
+  (wgsl/pre-tick)
   )
 
 (defn tick
@@ -40,7 +42,7 @@
   []
   )
 
-(defn post
+(defn post-tick
   "Ticks the output systems."
   []
   ;;(input/post)

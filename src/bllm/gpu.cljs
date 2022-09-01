@@ -34,39 +34,72 @@
   "The `texture-format` detected to be most efficient for presented surfaces."
   nil)
 
-(def1 ^:private resources
-  "An array of system resources, in declaration order, to maintain alongside the
-  GPU `device`. This allows for both late initialization and re-initialization
-  in case the device needs to be recreated or the resource definition changed.
+(defenum resource-tier
+  "Initialization layer of a system resource. Supersedes declaration order."
+  {:prefix tier-}
+  tier-group ; Bind groups layouts
+  tier-entry ; Shader stages, pipeline layouts
+  tier-state ; Compute & render pipelines
+  tier-MAX)
 
-  Prefer the `defres` macro to declare system resources."
-  #js [])
+(defn- resource-container [Tier]
+  (let [res (js/Array. tier-MAX)]
+    (dotimes [n tier-MAX]
+      (aset res n (new Tier)))
+    res))
+
+(def1 ^:private resources
+  "System resources to maintain alongside the GPU `device`.
+
+  Provides a foundation to define new resources at runtime.
+  - Auto construction; links a var or field instance to its `GPUObject`.
+  - Tiered storage; resources can only refer to lower tier resources.
+  - Live freedom; add or modify resources decoupled from declaration order.
+
+  Prefer the `defres` macro to manually declare system resource vars."
+  (resource-container js/Map))
+
+(def1 ^:private dirty-resources
+  (resource-container js/Set))
+
+(comment (js/console.log resources)
+         (js/console.log dirty-resources))
 
 (defn- init-resources []
-  (util/doarray [res resources]
-    (res.set)))
+  (dotimes [n tier-MAX]
+    (util/domap [res _ (aget resources n)]
+      (res.set))))
 
-(defn- try-init-resource [res]
-  (when (and device (nil? (res.get)))
-    (res.set)))
+(defn- try-init-resource [tier res]
+  (when device
+    (let [^js/Set dirty (aget dirty-resources tier)]
+      (.add dirty res))))
 
 (defn try-destroy [^js/GPUBaseObject obj]
   (when (and obj (.-destroy obj))
     (.destroy obj)))
 
-(defn register [id hash get set]
-  (if-let [res (.find resources (fn [res] (= res.id id)))]
-    (when (not= hash res.hash) ; Re-registering with different ctor.
-      (set! res.hash hash)
-      (set! res.set  set)
+(defn recreate [tier id]
+  (let [^js/Map layer (aget resources tier)]
+    (when-let [res (.get layer id)]
       (try-destroy (res.get))
-      (try-init-resource res))
-    (let [res #js {:id   id
-                   :hash hash
-                   :get  get
-                   :set  set}]
-      (.push resources res)
-      (try-init-resource res))))
+      (try-init-resource tier res))))
+
+(defn register [tier id hash get set]
+  (assert (< -1 tier tier-MAX))
+  (let [^js/Map layer (aget resources tier)]
+    (if-let [res (.get layer id)]
+      (when (not= hash res.hash) ; Re-registering with different ctor.
+        (set! res.hash hash)
+        (set! res.set  set)
+        (try-destroy (res.get))
+        (try-init-resource tier res))
+      (let [res #js {:id   id
+                     :hash hash
+                     :get  get
+                     :set  set}]
+        (.set layer id res)
+        (try-init-resource tier res)))))
 
 (defn- on-uncaptured-error [e]
   ;; TODO handle errors
@@ -120,6 +153,15 @@
       (-> (js/navigator.gpu.requestAdapter
            #js {:powerPreference "high-performance"}) ^js/Promise
           (.then set!-adapter)))))
+
+(defn pre-tick []
+  ;; TODO reuse this to auto-size render targets on viewport resize?
+  ;; canvas events -> viewport -> attached targets -> scale factor -> schedule dirty reinit
+  (dotimes [n tier-MAX]
+    (let [^js/Set dirty (aget dirty-resources n)]
+      (util/docoll [res dirty]
+        (res.set))
+      (.clear dirty))))
 
 (comment
   (util/doiter [x (.. adapter -features values)]
@@ -764,6 +806,9 @@ fn frag() -> @location(0) vec4<f32> {
 
 ;;; Generic System Resources
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defres empty-bind-group
+  :group (bind-group-layout "empty" (util/array)))
 
 (comment
   (defres default-tex

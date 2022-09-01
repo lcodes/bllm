@@ -129,9 +129,10 @@
 
 (defm defres
   "Defines a GPU resource. Its value will be set when a device is acquired."
-  [sym init]
+  [sym tier init]
   `(do (bllm.util/def1 ~sym js/undefined)
        (bllm.gpu/register
+        ~(symbol util/ns-gpu (str "tier-" (name tier)))
         ~(hash sym) ~(hash init)
         (fn ~'get [] ~sym) ; NOTE only required in development
         (fn ~'set [] (set! ~sym ~init)))))
