@@ -30,4 +30,4 @@
   ;; reset pass enc ?
   (let [enc nil]
     ;; end enc
-    (gpu/submit1 (.finish enc))))
+    (gpu/submit-1 (.finish enc))))

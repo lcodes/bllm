@@ -1150,32 +1150,31 @@
     1 (first g)
     (throw (ex-info "Too many elements of the same kind" {:elem g}))))
 
-(defn- emit-pipeline [& elems]
-  ;; TODO where does `gpu/defres` fit in this -> implement that subsystem first
-  (with-meta `(cljs.core/array ~@(map :name elems))
-    {:deps (filter some? (map ::uuid elems))}))
+(defn- wrap-deps [m]
+  (with-meta m {:deps (filter some? (vals m))}))
 
-(defn- resolve-vars [env vars]
-  (map (partial ana/resolve-existing-var env) vars))
+(defn- emit-pipeline [env vars args]
+  (let [g (group-by ::kind (map (partial ana/resolve-existing-var env) vars))]
+    (-> (fn [m k]
+          (->> (if (:required (meta k))
+                   (required-first (g k))
+                   (optional-first (g k)))
+               ::uuid
+               (assoc m k)))
+        (reduce {} args)
+        (wrap-deps))))
 
-(defnode defcompute
-  {:wgsl false}
-  [sym & layout|stage]
-  (let [{:keys [layout compute]}
-        (group-by ::kind (resolve-vars &env layout|stage))]
-    (emit-pipeline (required-first layout)
-                   (required-first compute))))
+(defm defpipeline [sym elems]
+  (let [args (mapv keyword elems)]
+    `(defnode ~sym
+       {:wgsl false :props false
+        :keys ~args
+        :args ~['& (set elems)]}
+       [sym# & vars#]
+       (emit-pipeline ~'&env vars# ~args))))
 
-(defnode defrender
-  {:wgsl false}
-  [sym & layout|stages|states]
-  (let [{:keys [layout vertex pixel primitive depth-stencil multisample depth]}
-        (group-by ::kind (resolve-vars &env layout|stages|states))]
-    (emit-pipeline (required-first layout)
-                   (required-first vertex)
-                   (optional-first pixel)
-                   (optional-first primitive)
-                   (optional-first depth-stencil)
-                   (optional-first multisample)
-                   (optional-first depth))))
-;; TODO fragment blends, match number of outputs in fragment stage (or 0, or 1 repeated blend)
+(defpipeline defcompute
+  [layout ^:required kernel])
+
+(defpipeline defrender
+  [layout ^:required vertex primitive depth-stencil multisample pixel])

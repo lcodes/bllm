@@ -31,6 +31,12 @@
   EFFECT
   MODEL)
 
+(wgsl/defkernel test-kernel [8 8]
+  )
+
+(wgsl/defcompute test-compute
+  test-kernel)
+
 (wgsl/defgroup ^:override frame-data
   "Values uploaded once per frame to the GPU."
   FRAME
@@ -162,6 +168,8 @@
 (wgsl/defpixel ps-demo
   (frag-color = (vec4 0.42 0 0.69 1)))
 
+(wgsl/defrender render-demo vs-demo ps-demo)
+
 (wgsl/defvertex vs-sky
   "Infinitely large cube projected around the camera."
   (io-texcoord-3d = (normalize local-position))
@@ -174,6 +182,7 @@
 (wgsl/defpixel ps-sky
   (frag-color = (texture-sample tex-skybox linear-mip io-texcoord-3d)))
 
+#_
 (do (wgsl/compile vs-demo)
     (wgsl/compile ps-demo)
     (wgsl/compile vs-sky)
@@ -775,23 +784,21 @@ fn demo_frag() -> @location(0) vec4<f32> {
 (defn setup-sine []
   (js/Math.sin (* 0.00015 time/unscaled-now)))
 
-(defn post-tick [])
-#_
 (defn post-tick
   "Application logic executed after each simulation tick."
   []
 
   (setup-target pass-desc)
-  (upload-ubo (setup-sine))
+  #_(upload-ubo (setup-sine))
 
   (let [enc (gpu/command-encoder "Demo Frame")
         cmd (.beginRenderPass enc pass-desc)]
-    (.setPipeline cmd render-pipe)
-    (.setVertexBuffer cmd 0 vbo)
-    (.setBindGroup cmd 0 bind-grp)
-    (.draw cmd 3)
+    #_(.setPipeline cmd render-pipe)
+    #_(.setVertexBuffer cmd 0 vbo)
+    #_(.setBindGroup cmd 0 bind-grp)
+    #_(.draw cmd 3)
     (.end cmd)
-    (gpu/submit1 (.finish enc))))
+    (gpu/submit-1 (.finish enc))))
 
 (comment (js/console.log gpu/device)
          (js/console.log wgsl/node-defs))

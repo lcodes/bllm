@@ -230,8 +230,9 @@
 (defwgsl group  [bind])
 (defwgsl layout [groups])
 
-(defwgsl compute [pipeline])
-(defwgsl render  [pipeline])
+(defwgsl compute [layout kernel])
+(defwgsl render  [layout vertex primitive depth-stencil multisample fragment])
+;; TODO are blend states dependent of fragment or render?
 
 
 ;;; Shader System
@@ -240,6 +241,10 @@
 (def1 ^:private defs "Shader node definitions." (js/Map.)) ; ID -> Node
 (def1 ^:private deps "Shader node dependents."  (js/Map.)) ; ID -> (js/Set ID)
 (def1 ^:private mods "Shader modules." (js/Map.)) ; Handle -> js/GPUShaderModule
+
+(comment (js/console.log defs)
+         (js/console.log deps)
+         (js/console.log mods))
 
 (def1 ^:private dirty-ids
   "A set of IDs to the shader nodes modified since the last tick.
@@ -252,10 +257,6 @@
 
   Only references `Kernel`, `Vertex` and `Pixel` nodes."
   (js/Set.))
-
-(comment (js/console.log defs)
-         (js/console.log deps)
-         (js/console.log mods))
 
 (defn empty-io []
   nil)
@@ -287,7 +288,7 @@
     nil))
 
 (defn- release-module [mod-id]
-  (let [mod (.get mods mod-id)]
+  (when-let [mod (.get mods mod-id)]
     (util/dec! mod.refs)
     (when (zero? mod.refs)
       (.delete mods mod-id))))
@@ -351,14 +352,36 @@
               (let [grp (.get defs id)] grp.gpu))))
     (gpu/pipeline-layout node.uuid groups)))
 
+(defn- shader [stage id arg]
+  (if-let [node (.get defs id)]
+    (stage (.get mods node.mod) node.name arg)
+    (stage js/undefined "" (util/array))))
+
+(defn- auto-layout [node]
+  ;; TODO can do better than "auto"
+  ;; - tracking bindings dependencies and their dependent groups
+  ;; - slower, wont work if binding used in multiple groups, but
+  gpu/empty-pipeline-layout)
+
 (defn- compute-pipeline [node]
-  #_(gpu/compute )
-  #_(gpu/compute-pipeline ))
+  (assert (= Compute node.kind))
+  (shader gpu/compute   node.kernel nil)
+  (gpu/compute-pipeline node.name (auto-layout node)))
+
+(defn- attr-buffers [node]
+  (util/array)) ; TODO
+
+(defn- draw-targets [node]
+  (util/array)) ; TODO
 
 (defn- render-pipeline [node]
-  #_(gpu/vertex )
-  #_(gpu/fragment )
-  #_(gpu/render-pipeline ))
+  (assert (= Render node.kind))
+  (shader gpu/vertex   node.vertex   (attr-buffers node))
+  (shader gpu/fragment node.fragment (draw-targets node))
+  (gpu/render-pipeline node.name     (auto-layout  node)
+                       node.primitive
+                       node.depth-stencil
+                       node.multisample))
 
 (defn- reg-gpu [^object node ctor]
   (assert (nil? node.gpu))
@@ -461,12 +484,11 @@
       (js/console.log src)
       (js/console.log g)
       ;; Compile, validate & dispatch.
-      (let [^object mod
-            (gpu/shader-module lbl src
-                               js/undefined   ; TODO source map
-                               js/undefined)] ; TODO hints
+      (let [^object mod (gpu/shader-module lbl src
+                                           js/undefined   ; TODO source map
+                                           js/undefined)] ; TODO hints
         (set! (.-refs mod) (.-size entry-ids))
         (util/debug (set! (.-src mod) src))
-        (aset mods time/frame-number mod)
+        (.set mods time/frame-number mod)
         (gpu/dump-errors mod) ; TODO async, check result here
         (.clear entry-ids)))))

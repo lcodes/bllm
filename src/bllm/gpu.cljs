@@ -42,6 +42,8 @@
   tier-state ; Compute & render pipelines
   tier-MAX)
 
+(defconst tier-system tier-group)
+
 (defn- resource-container [Tier]
   (let [res (js/Array. tier-MAX)]
     (dotimes [n tier-MAX]
@@ -442,8 +444,8 @@
   [mipmapFilter  mipmap-filter-mode nearest]
   [lodMinClamp   :f32                     0]
   [lodMaxClamp   :f32                    32]
-  [compare       compare-function          ]
-  [maxAnisotropy ::u16                    1])
+  [compare       compare-function    always]
+  [maxAnisotropy :u16                     1])
 
 (defflag shader-stage
   "Compile-time constants equivalent to the runtime `js/GPUShaderStage`."
@@ -531,6 +533,7 @@
   "Low-level pipeline creation, called from `bllm.wgsl`.
 
   Note: set the `compute` stage *before* calling this."
+  [layout  ::pipeline-layout]
   ^:static
   [compute ::programmable-stage])
 
@@ -704,6 +707,15 @@
 ;;; Samplers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- make-sampler
+  ([label address-mode filter]
+   (make-sampler label address-mode filter nearest))
+  ([label address-mode filter mip-filter]
+   (sampler label
+            address-mode address-mode address-mode
+            filter filter mip-filter
+            nil nil always 1))) ; TODO nils shouldnt break enum expansion -> use default
+
 
 ;;; Shader Modules
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -766,7 +778,7 @@ fn frag() -> @location(0) vec4<f32> {
 (defn submit [cmd-bufs]
   (.submit (.-queue device) cmd-bufs))
 
-(defn submit1 [cmd-buf]
+(defn submit-1 [cmd-buf]
   (submit (util/array cmd-buf)))
 
 
@@ -810,8 +822,27 @@ fn frag() -> @location(0) vec4<f32> {
 ;;; Generic System Resources
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defres nearest-clamp
+  :system (make-sampler label clamp-to-edge nearest))
+
+(defres linear-clamp
+  :system (make-sampler label clamp-to-edge linear))
+
+(defres nearest-mip-clamp
+  :system (make-sampler label clamp-to-edge nearest linear))
+
+(defres linear-mip-clamp
+  :system (make-sampler label clamp-to-edge linear linear))
+
+(defres linear-repeat
+  :system (make-sampler label repeat linear))
+
 (defres empty-bind-group
-  :group (bind-group-layout "empty" (util/array)))
+  "Used to fill unused group bindings in a pipeline layouts."
+  :group (bind-group-layout label (util/array)))
+
+(defres empty-pipeline-layout
+  :entry (pipeline-layout label (util/array)))
 
 (comment
   (defres default-tex
@@ -822,20 +853,5 @@ fn frag() -> @location(0) vec4<f32> {
 
   (defres white-tex
     (texture-2d label rgba8unorm 1 1 (util/color 0xff 0xff 0xff 0xff)))
-
-  (defres nearest-clamp
-    (sampler label))
-
-  (defres linear-clamp
-    (sampler label))
-
-  (defres linear-mip-clamp
-    (sampler label))
-
-  (defres nearest-mip-clamp
-    (sampler label))
-
-  (defres linear-repeat
-    (sampler label))
 
   )
