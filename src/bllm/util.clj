@@ -153,7 +153,7 @@
   true) ; TODO
 
 (defmacro debug [& expr]
-  expr) ; TODO conditional compilation
+  (list* 'do expr)) ; TODO conditional compilation
 
 (defmacro debug-when [cond & expr]
   `(bllm.util/debug (when ~cond ~@expr)))

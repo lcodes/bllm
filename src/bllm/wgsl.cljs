@@ -6,6 +6,7 @@
   (:require [bllm.base]
             [bllm.gpu  :as gpu]
             [bllm.meta :refer [defenum]]
+            [bllm.time :as time]
             [bllm.util :as util :refer [def1 === str!]]))
 
 (set! *warn-on-infer* true)
@@ -52,48 +53,25 @@
   Render
   Compute)
 
-(defn- gpu-type [node]
-  (if (number? node.type)
-    (gpu/prim-type node.type)
-    node.name))
-
-(defn- gpu-field-type [type-or-node]
+(defn- field-type [type-or-node]
   (if (number? type-or-node)
     (gpu/prim-type type-or-node)
     type-or-node.name))
 
-(defenum storage-address-space
-  "Whether a storage binding is immutable (default) or mutable."
-  {:repr :string}
-  r  "<storage>"
-  rw "<storage,read_write>")
 
-(defn texture-suffix [view]
-  (case view
-    gpu/view-1d         "1d"
-    gpu/view-2d         "2d"
-    gpu/view-2d-array   "2d_array"
-    gpu/view-3d         "3d"
-    gpu/view-cube       "cube"
-    gpu/view-cube-array "cube_array"))
-
-(defn gpu-texture-type [node]
-  (let [ts (texture-suffix node.view)
-        ms (when node.multisampled "multisampled_")]
-    (if (= node.sample gpu/depth)
-      (str "texture_depth_" ms ts)
-      (str "texture_"       ms ts \< (gpu/prim-type node.type) \>))))
-
-(defn- io-bind [slot]
-  (if (neg? slot)
-    ""
-    slot))
+;;; Stateless Code Definitions
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- emit-enum [node]
   "TODO")
 
+(defwgsl enum [keys vals] emit-enum)
+(defwgsl flag [keys vals] emit-enum)
+
 (defn- emit-const [node]
-  (str "const " node.name " : " node.type " = " node.init ";"))
+  ;; FIXME `const` keyword errors on latest Brave, but part of WGSL spec?
+  ;; TODO infer type from wgsl/defconst
+  (str "var<private> " node.name " : f32" " = " node.init ";"))
 
 (defn- emit-override [node]
   ;; TODO will need node.id to be in [0..65535]
@@ -101,21 +79,13 @@
        (when node.init " = ")
        node.init ";"))
 
-(defn- emit-io [node]
-  (str "@location(" (io-bind node.bind) ") "
-       node.name " : " (gpu/prim-type node.type)))
-
-(defn- emit-bind [node address-space type]
-  (str "@group(" node.group ") @binding(" node.bind ") var"
-       address-space " " node.name " : " type ";"))
-
-(defn- emit-var [node address-space type-fn]
-  (emit-bind node address-space (type-fn node)))
+(defwgsl const    [type init] emit-const)
+(defwgsl override [type init] emit-override)
 
 (defn- emit-struct [node type-suffix]
   (let [wgsl (str "struct " node.name type-suffix " {\n")]
     (util/doarray [f node.info]
-      (str! wgsl "  " f.name " : " (gpu-field-type f.type) ",\n"))
+      (str! wgsl "  " f.name " : " (field-type f.type) ",\n"))
     (str! wgsl "}")
     wgsl))
 
@@ -124,9 +94,98 @@
     (util/doarray [arg i node.args]
       (when (pos? i)
         (str! wgsl ", "))
-      (str! wgsl arg.name " : " (gpu-field-type arg.type)))
-    (str! wgsl ") -> " (gpu-field-type node.ret) " {\n" node.wgsl \})
+      (str! wgsl arg.name " : " (field-type arg.type)))
+    (str! wgsl ") -> " (field-type node.ret) " {\n" node.wgsl \})
     wgsl))
+
+(defwgsl struct [info] (emit-struct ""))
+(defwgsl function [ret args wgsl] emit-fn)
+
+;; TODO promote fields to first-class defwgsl. (see comment on `argument`)
+(defn field [name type offset]
+  #js {:name name :type type :byte offset})
+
+;; TODO promote arguments to first-class defwgsl.
+;; - idea is to have defarg and reuse decl across functions
+;; - often have the same param to document over and over -> do it once
+(defn argument [name type]
+  #js {:name name :type type})
+
+
+;;; Stateless Shader Nodes
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn- emit-bind [node address-space type]
+  (str "@group(" node.group ") @binding(" node.bind ") var"
+       address-space " " node.name " : " type ";"))
+
+(defn- emit-var [node address-space type-fn]
+  (emit-bind node address-space (type-fn node)))
+
+(defn- uniform-type [t]
+  (str t.name "_t"))
+
+;;      dynamic offset
+;;      min-binding-size -> ::size
+(defwgsl buffer [group bind type info]
+  (emit-struct "_t") ; TODO support primitive uniforms?
+  (emit-var "<uniform>" uniform-type)) ; TODO storage
+
+(defn- texture-suffix [view]
+  (case view
+    gpu/view-1d         "1d"
+    gpu/view-2d         "2d"
+    gpu/view-2d-array   "2d_array"
+    gpu/view-3d         "3d"
+    gpu/view-cube       "cube"
+    gpu/view-cube-array "cube_array"))
+
+(defn- texture-type [node]
+  (let [ts (texture-suffix node.view)
+        ms (when node.multisampled "multisampled_")]
+    (if (= node.sample gpu/depth)
+      (str "texture_depth_" ms ts)
+      (str "texture_"       ms ts \< (gpu/prim-type node.type) \>))))
+
+(defn- storage-type [node]
+  (str "texture_storage_" (texture-suffix node.view)
+       \< (gpu/texture-format node.texel)
+       \, (gpu/storage-access node.access) \>))
+
+;; TODO multisampled
+(defwgsl texture [group bind view type sample]
+  (emit-var "" texture-type))
+
+(defwgsl storage [group bind view texel access type]
+  (emit-var "" storage-type))
+
+(defwgsl sampler [group bind type]
+  (emit-bind "" (if (= type gpu/comparison)
+                  "sampler_comparison"
+                  "sampler")))
+
+(defn- emit-io [node]
+  (str "@location(" (if (neg? node.bind) "" node.bind) ") "
+       node.name " : " (gpu/prim-type node.type)))
+
+(defn- emit-builtin [node]
+  (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
+
+(defwgsl vertex-attr [bind type] emit-io)
+(defwgsl draw-target [bind type] emit-io)
+(defwgsl interpolant [bind type] emit-io)
+(defwgsl builtin [stage dir type] emit-builtin)
+
+(defgpu primitive)
+(defgpu stencil-face)
+(defgpu depth-stencil)
+(defgpu multisample)
+(defgpu blend-comp)
+(defgpu blend)
+
+
+;;; Stateful Shader Nodes
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- emit-kernel [node]
   (let [wgsl (str "@compute @workgroup_size(" node.x)]
@@ -153,80 +212,9 @@
 (def emit-vertex (partial emit-entry "vertex"   "_in" "_io"))
 (def emit-pixel  (partial emit-entry "fragment" "_io" "_out"))
 
-
-;;; Stateless Node Definitions
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn- emit-builtin [node]
-  (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
-
-(defwgsl builtin [stage dir type] emit-builtin)
-(defwgsl vertex-attr [bind type] emit-io)
-(defwgsl draw-target [bind type] emit-io)
-(defwgsl interpolant [bind type] emit-io)
-
-(defn- uniform-type [t]
-  (str t.name "_t"))
-
-;;      dynamic offset
-;;      min-binding-size -> ::size
-(defwgsl buffer [group bind type info]
-  (emit-struct "_t") ; TODO support primitive uniforms?
-  (emit-var "<uniform>" uniform-type)) ; TODO storage
-
-;; multisampled
-(defwgsl texture [group bind view type sample]
-  (emit-var "" gpu-texture-type))
-
-;; view-dimension
-;; storage: texel format, access (read, write, read_write)
-(defwgsl storage [group bind type access]
-  (emit-var (storage-address-space access) gpu-type))
-
-(defwgsl sampler [group bind type]
-  (emit-bind "" (if (= type gpu/comparison)
-                  "sampler_comparison"
-                  "sampler")))
-
-(defwgsl struct [info] (emit-struct ""))
-
-;; TODO promote fields to first-class defwgsl. (see comment on `argument`)
-(defn field [name type offset]
-  #js {:name name :type type :byte offset})
-
-(defwgsl enum [keys vals] emit-enum)
-(defwgsl flag [keys vals] emit-enum)
-
-(defwgsl const    [type init] emit-const)
-(defwgsl override [type init] emit-override)
-
-(defwgsl function [ret args wgsl] emit-fn)
-
-;; TODO promote arguments to first-class defwgsl.
-;; - idea is to have defarg and reuse decl across functions
-;; - often have the same param to document over and over -> do it once
-(defn argument [name type]
-  #js {:name name :type type})
-
-
-;;; Stateful Shader Nodes
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(comment (primitive 1090 nil nil nil nil nil)
-         (depth-stencil 4321 1234 25 17))
-
-(defgpu primitive)
-(defgpu stencil-face)
-(defgpu depth-stencil)
-(defgpu multisample)
-(defgpu blend-comp)
-(defgpu blend)
-
-(defwgsl kernel [in x y z wgsl] emit-kernel) ; TODO workgroup components can be ref to override var
+(defwgsl kernel [in x y z wgsl] emit-kernel)
 (defwgsl vertex [in out   wgsl] emit-vertex)
 (defwgsl pixel  [in out   wgsl] emit-pixel)
-;; TODO check limits against device, mark shader usable/unusable
-;;      - fallback mechanisms
 
 (defwgsl group  [bind])
 (defwgsl layout [groups])
@@ -240,6 +228,7 @@
 
 (def1 ^:private defs "Shader node definitions." (js/Map.)) ; ID -> Node
 (def1 ^:private deps "Shader node dependents."  (js/Map.)) ; ID -> (js/Set ID)
+(def1 ^:private mods "Shader modules." (js/Map.)) ; Handle -> js/GPUShaderModule
 
 (def1 ^:private requests
   "An array of pipeline requests. Used to populate `entry-ids`.
@@ -274,6 +263,60 @@
         (.set defs id io)
         io)))
 
+(defn- entry? [node]
+  (case node.kind (Kernel Vertex Pixel) true false))
+
+(defn- state? [node]
+  (case node.kind (Group Layout Compute Render) true false))
+
+(defn- gpu-tier [kind]
+  (case kind
+    (Group) gpu/tier-group
+    (Layout
+     Kernel
+     Vertex
+     Pixel) gpu/tier-entry
+    (Compute
+     Render) gpu/tier-state
+    nil))
+
+(defn- release-module [mod-id]
+  (let [mod (.get mods mod-id)]
+    (util/dec! mod.refs)
+    (when (zero? mod.refs)
+      (.delete mods mod-id))))
+
+;; TODO change wgsl def* to allow reusing unchanged nodes?
+;; - right now it always sets the new node as the var; adds complexity to state mgmt
+;; - only relevant in dev (or live code), prod build registers everything once
+(defn register
+  "Registers a shader graph node definition."
+  [^object node]
+  ;; Old node (dev only)
+  (when-let [existing (.get defs node.uuid)]
+    (if (= existing.hash node.hash)
+      (cond (state? node) (set! (.-gpu node) existing.gpu)
+            (entry? node) (set! (.-mod node) existing.mod))
+      (do (.add dirty-ids node.uuid) ; Will end up recreating GPU states.
+          (cond (state? node) (release-module  node.mod)
+                (entry? node) (gpu/try-destroy node.gpu))
+          (when-let [old-deps existing.deps]
+            (util/docoll [id old-deps]
+              (.delete (.get deps id) node.uuid))))))
+  ;; New node
+  (.set defs node.uuid node)
+  (when-let [new-deps node.deps]
+    (util/docoll [id new-deps]
+      (-> (.get deps id)
+          (or (let [ids (js/Set.)]
+                (.set deps id ids)
+                ids))
+          (.add node.uuid))))
+  ;; Debug
+  (js/console.log node)
+  (when node.wgsl (js/console.log node.wgsl))
+  node)
+
 (defn- bind-group-layout [node]
   (assert (= Group node.kind))
   (let [^js/Array ids node.deps
@@ -301,60 +344,44 @@
               (let [grp (.get defs id)] grp.gpu))))
     (gpu/pipeline-layout node.uuid groups)))
 
-(defn- gpu-tier [kind]
-  (case kind
-    (Group) gpu/tier-group
-    (Layout
-     Kernel
-     Vertex
-     Pixel) gpu/tier-entry
-    (Compute
-     Render) gpu/tier-state
-    nil))
+;; TODO `gpu/tier-state` needs to tick after module creation
+(defn- compute-pipeline [node]
+  #_(gpu/compute-pipeline ))
+
+(defn- render-pipeline [node]
+  #_(gpu/render-pipeline ))
 
 (defn- reg-gpu [^object node ctor]
   (gpu/register (gpu-tier node.kind) node.uuid node.hash
                 (fn get []       (.-gpu node))
                 (fn set [] (set! (.-gpu node) (ctor node)))))
 
-(defn register
-  "Registers a shader graph node definition."
-  [^object node]
-  ;; Old node
-  (when-let [existing (.get defs node.uuid)]
-    (if (= existing.hash node.hash)
-      (when-let [gpu existing.gpu]
-        (set! (.-gpu node) gpu)) ; Move GPU state to new node.
-      (do (gpu/try-destroy node.gpu)
-          (.add dirty-ids node.uuid) ; Will also recreate dependent GPU states.
-          (when-let [old-deps existing.deps]
-            (util/docoll [id old-deps]
-              (.delete (.get deps id) node.uuid))))))
-  ;; New node
-  (.set defs node.uuid node)
-  (when-let [new-deps node.deps]
-    (util/docoll [id new-deps]
-      (-> (.get deps id)
-          (or (let [ids (js/Set.)]
-                (.set deps id ids)
-                ids))
-          (.add node.uuid))))
-  (case node.kind
-    Group  (reg-gpu node bind-group-layout)
-    Layout (reg-gpu node pipeline-layout)
-    nil)
-  ;; Debug
-  (js/console.log node)
-  (when node.wgsl (js/console.log node.wgsl))
-  node)
+(defn- reg-mod [^object node]
+  (.add entry-ids node.uuid)
+  (set! (.-mod ^object node) time/frame-number))
 
-(defn- entry? [node]
-  (let [kind node.kind]
-    (or (=== Vertex kind) (=== Pixel kind) (=== Kernel kind))))
+(defn- check-dirty [ids]
+  (util/docoll [id ids]
+    (some-> (.get deps id) (check-dirty))
+    (let [node (.get defs id)]
+      (case node.kind
+        Group   (reg-gpu node bind-group-layout)
+        Layout  (reg-gpu node pipeline-layout)
+        Compute (reg-gpu node compute-pipeline)
+        Render  (reg-gpu node render-pipeline)
+        (Kernel
+         Vertex
+         Pixel) (reg-mod node)
+        nil))))
+
+(defn pre-gpu []
+  (when (pos? (.-size dirty-ids))
+    (check-dirty dirty-ids)
+    (.clear dirty-ids)))
 
 (defn compile [node] ; TODO from pipeline request -> gpu/defres
   (assert (entry? node))
-  (.add entry-ids node.uuid)
+  (reg-mod node)
   ;; - variant overrides
   ;; - return index? (how to get compiled module into gpu pipelines?)
   )
@@ -403,40 +430,37 @@
       (some->> node.out (.add io))))
   io)
 
-(defn- check-dirty [ids]
-  (util/docoll [id ids]
-    (some-> (.get deps id)
-            (check-dirty))
-    (let [node (.get defs id)]
-      (some-> (gpu-tier node)
-              (gpu/recreate id))
-      (when (entry? node)       ; TODO collect pipelines, not entries -> unused entries dont need to exist
-        (.add entry-ids id))))) ; - still want to ensure entry points compile at the REPL, use a dev switch?
-
-(defn pre-gpu []
-  (when (pos? (.-size dirty-ids))
-    (check-dirty dirty-ids)
-    (.clear dirty-ids)))
-
 (defn pre-tick []
   (when (pos? (.-size entry-ids))
     (let [g   (-> (to-module entry-ids)
                   (topo-sort util/temp-array))
-          lbl "Generated"
+          idx time/frame-number
+          lbl (str idx)
           src (str "// " lbl "\n")] ; TODO add version info, in case text is saved
+      ;; Emit constants.
+      (util/doarray [node g]
+        (when (= Const node.kind)
+          (str! src "\n" node.wgsl "\n")))
+      ;; Emit GenIO nodes.
       (util/docoll [io (collect-io g util/temp-set)]
         (str! src "\n// @wgsl " io.uuid "\nstruct " io.name " {\n")
         (util/doarray [id io.deps]
           (let [elem (.get defs id)]
             (str! src "  " elem.wgsl ", // #wgsl " elem.uuid "\n")))
         (str! src "}\n"))
+      ;; Emit generic sorted nodes.
       (util/doarray [node g]
-        (str! src "\n// #wgsl " node.uuid "\n" node.wgsl "\n"))
-      (let [mod (gpu/shader-module lbl src
-                                   js/undefined   ; TODO source map
-                                   js/undefined)] ; TODO hints
-        (gpu/dump-errors mod)
-        (js/console.log src)
-        (js/console.log g)
-        ;; TODO loop through all requests, propagate shaders to pipelines, live updates
+        (when (not= Const node.kind)
+          (str! src "\n// #wgsl " node.uuid "\n" node.wgsl "\n")))
+      (js/console.log src)
+      (js/console.log g)
+      ;; Compile, validate & dispatch.
+      (let [^object mod
+            (gpu/shader-module lbl src
+                               js/undefined   ; TODO source map
+                               js/undefined)] ; TODO hints
+        (set! (.-refs mod) (.-size entry-ids))
+        (util/debug (set! (.-src mod) src))
+        (aset mods time/frame-number mod)
+        (gpu/dump-errors mod) ; TODO async, check result here
         (.clear entry-ids)))))

@@ -223,6 +223,13 @@
   ;; TODO f16 matrices
   )
 
+(defenum storage-access
+  "Whether a storage binding is immutable (default) or mutable."
+  {:repr :string}
+  read       :read
+  write      :write
+  read-write :read_write)
+
 (defflag buffer-usage
   "Compile-time constants equivalent to the runtime `js/GPUBufferUsage`."
   {:suffix -buffer}
@@ -241,10 +248,6 @@
   [size             :u64]
   [usage            ::buffer-usage]
   [mappedAtCreation :bool false])
-
-(defenum map-mode
-  read
-  write)
 
 (defenum texture-dimension
   {:repr :string :prefix dim-}

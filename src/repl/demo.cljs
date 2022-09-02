@@ -43,27 +43,27 @@
   (wgsl/defsampler linear-mip)
   (wgsl/defsampler linear-repeat))
 
-;; linear-mip.bind
-(comment (js/console.log linear-mip))
+(wgsl/defstorage cell-out MODEL 0 :view-2d :rgba8unorm :write)
 
-
-
-(wgsl/defgroup test-data
+(wgsl/defgroup post-data ;; TODO simplify, compose with generic bindings
   EFFECT
-  (wgsl/defsampler albedo-sampler))
-
-(wgsl/deflayout test-layout
-  frame-data
-  test-data
-  (wgsl/defgroup test-group-a
-    (wgsl/defsampler test-sampler-b)
-    (wgsl/deftexture test-tex :view-2d :f32)))
-
-(wgsl/defbuffer screen
-  PASS 3
-  [proj-params :vec4]
-  [params      :vec4]
-  [z-buffer    :vec4])
+  (wgsl/deftexture screen-tex  :view-2d :f32)
+  (wgsl/deftexture input-tex   :view-2d :f32)
+  (wgsl/deftexture bloom-tex   :view-2d :f32)
+  (wgsl/deftexture grain-tex   :view-2d :f32)
+  (wgsl/deftexture grading-lut :view-3d :f32)
+  (wgsl/defbuffer pp
+    [scatter  :f32]
+    [gamma    :f32]
+    [exposure :f32]
+    [dist1    :vec4]
+    [dist2    :vec4]
+    [bloom    :vec4]
+    [grain    :vec4]
+    [grain-st :vec4]
+    [chroma   :f32]
+    [vignette-params :vec3]
+    [vignette-color  :vec3]))
 
 (wgsl/defbuffer camera
   ""
@@ -75,6 +75,22 @@
   [proj-inv      :mat4]
   [view-proj-inv :mat4])
 
+(wgsl/defbuffer screen
+  PASS 1
+  [proj-params :vec4]
+  [params      :vec4]
+  [z-buffer    :vec4])
+
+(wgsl/defgroup gbuffer-data
+  PASS
+  camera
+  screen
+  (wgsl/deftexture gbuffer-albedo     :view-2d :f32)
+  (wgsl/deftexture gbuffer-normal     :view-2d :f32)
+  (wgsl/deftexture gbuffer-emissive   :view-2d :f32)
+  (wgsl/deftexture gbuffer-properties :view-2d :f32)
+  (wgsl/deftexture gbuffer-custom     :view-2d :f32)
+  (wgsl/deftexture gbuffer-depth      :view-2d :f32))
 
 (wgsl/definterpolant io-texcoord 0 :vec2)
 
@@ -221,10 +237,10 @@
           q.x)))
 
 (wgsl/defun srgb->linear :vec3 [c :vec3]
-  )
+  c) ; TODO
 
 (wgsl/defun linear->srgb :vec3 [c :vec3]
-  )
+  c) ; TODO
 
 (wgsl/defun luminance :f32 [c :vec3]
   (dot c (vec3 0.2126729 0.7151522 0.0721750)))
@@ -260,9 +276,11 @@
   [ao             :f32]
   [occlusion      :f32])
 
-(wgsl/deftexture irradiance-tex PASS 1 :view-cube :f32)
-(wgsl/deftexture prefilter-tex  PASS 2 :view-cube :f32)
-(wgsl/deftexture brdf-lut       PASS 3 :view-3d   :f32)
+(wgsl/defgroup lighting-data
+  EFFECT
+  (wgsl/deftexture irradiance-tex :view-cube :f32)
+  (wgsl/deftexture prefilter-tex  :view-cube :f32)
+  (wgsl/deftexture brdf-lut       :view-2d   :f32))
 
 (wgsl/defun lighting :vec3 [data Surface]
   (let [light-pos (vec3 0 0 0)
@@ -290,20 +308,20 @@
         n-dot-l (max (dot n l) EPSILON)
         ndf     (distribution-ggx n-dot-h data.roughness)
         g       (geometry-smith n-dot-v n-dot-l data.roughness 1 8)
-        f       (fresnel-schlick (saturate (dot h v)) f0)
+        f       (fresnel-schlick (clamp (dot h v) 0 1) f0)
 
         ks ((ndf * g * f) / (4 * n-dot-v * n-dot-l))
         kd (((vec3 1) - f) * one-minus-metallic)
         lo ((kd * data.albedo / PI * ks) * radiance * n-dot-l)
 
         ;; Diffuse irradiance
-        irradiance (texture-load irradiance-tex data.world-normal 0)
+        irradiance (vec4 0); TODO no cube load overload? (texture-load irradiance-tex data.world-normal 0)
         diffuse    (data.albedo * one-minus-specular * one-minus-metallic)
 
         ;; Specular reflectance
-        max-reflection-lod 12
+        max-reflection-lod 12.01 ; TODO float literals
         r    (reflect (- v) data.world-normal)
-        pf   (texture-load prefilter-tex r (data.roughness * max-reflection-lod))
+        pf   (texture-sample-bias prefilter-tex linear r (data.roughness * max-reflection-lod))
         brdf (texture-sample brdf-lut linear-mip (vec2 n-dot-v data.roughness))
         fr   ((max (vec3 (1 - data.roughness)) f0) - f0)
         ss   ((f0 + fr * (pow (1 - n-dot-v) 5)) * brdf.x + brdf.y)
@@ -321,36 +339,18 @@
 (wgsl/defun window-depth :f32 [depth :view-2d coord :vec2]
   (.r (texture-load depth coord 0)))
 
-(wgsl/deftexture gbuffer-albedo     PASS 4  :view-2d :f32)
-(wgsl/deftexture gbuffer-normal     PASS 6  :view-2d :f32)
-(wgsl/deftexture gbuffer-emissive   PASS 7  :view-2d :f32)
-(wgsl/deftexture gbuffer-properties PASS 8  :view-2d :f32)
-(wgsl/deftexture gbuffer-custom     PASS 9  :view-2d :f32)
-(wgsl/deftexture gbuffer-depth      PASS 10 :view-2d :f32)
+(comment
+  (wgsl/defkernel lighting-cs [8 8]
+    ;; TODO from material function
+    (let [^:mut data (Surface)
+          xy global-invocation-id.xy
+          albedo&specular (texture-load gbuffer-albedo (ivec2 xy) 0)]
+      ;; TODO use specular
+      (data.albedo = albedo&specular.rgb)
+      #_(let [depth ()])
+      (lighting data))))
 
-(wgsl/defkernel lighting-cs [8 8]
-  ;; TODO from material function
-  (let [^:mut data (Surface)
-        xy global-invocation-id.xy
-        albedo&specular (texture-load gbuffer-albedo xy 0)]
-    ;; TODO use specular
-    (data.albedo = albedo&specular.rgb)
-    #_(let [depth ()])
-    (lighting data)))
-
-(wgsl/defbuffer pp
-  EFFECT 0
-  [scatter  :f32]
-  [gamma    :f32]
-  [exposure :f32]
-  [dist1    :vec4]
-  [dist2    :vec4]
-  [vignette-params :vec3]
-  [vignette-color  :vec3])
-
-(wgsl/defun ^:feature tonemap [c :vec3])
-
-(wgsl/defun tonemap:linear [c :vec3]
+(wgsl/defun ^:feature tonemap :vec3 [c :vec3]
   (pow (c * pp.exposure)
        (vec3 (1 / pp.gamma))))
 
@@ -362,32 +362,7 @@
 (wgsl/defun tonemap:uncharted-2 [x :vec2]
   )
 
-
-;; TODO will need some way of organizing binding numbers
-;;  - declare group & bindings at once? at least removes group & bind args
-;;  - are resource bindings ever reused across groups?
-(comment ;; want something like this
-  (wgsl/defstorage reusable 2 0)
-  (wgsl/defgroup effect-grp 2
-    reusable
-    (wgsl/deftexture screen-tex :view-2d) ; bound to (reusable.bind + 1)
-    (wgsl/defbuffer screen ; bound to (screen-tex.bind + 1)
-      [params :vec4]))
-  (wgsl/deflayout l
-    ;; groups 0 & 1 are null, because effect-grp starts at 2
-    effect-grp
-    (wgsl/defgroup inline-grp ; bound to (effect-grp.bind + 1)
-      (wgsl/defsampler layout-specific-sampler)))
-  )
-;;
-
-(wgsl/deftexture screen-tex  EFFECT 0 :view-2d :f32)
-(wgsl/deftexture input-tex   EFFECT 0 :view-2d :f32)
-(wgsl/deftexture bloom-tex   EFFECT 1 :view-2d :f32)
-(wgsl/deftexture grain-tex   EFFECT 2 :view-2d :f32)
-(wgsl/deftexture grading-lut EFFECT 3 :view-3d :f32)
-
-(wgsl/defun ^:feature distort-uv [uv :vec2]
+(wgsl/defun ^:feature distort-uv :vec2 [uv :vec2]
   (let [center pp.dist1.xy ; TODO don't want to manually pack/unpack such things
         axis   pp.dist1.zw
         theta  pp.dist2.x
@@ -398,15 +373,16 @@
         ruv (axis * (uv - 0.5 - center))
         ru  (length ruv)
         rus (ru * sigma)
+        ^f32
         ru  (if (ampli > 0)
               (* (tan (ru * theta)) (1 / rus))
               (* (1 / ru) theta (atan rus)))]
     (uv + ruv * (ru - 1))))
 
-(wgsl/defun ^:feature bloom [c :vec3 uv :vec2]
-  (c + (.rgb (texture-load bloom-tex uv 0)) * pp.bloom.rgb + pp.bloom.w))
+(wgsl/defun ^:feature bloom :vec3 [c :vec3 uv :vec2]
+  (c + (.rgb (texture-load bloom-tex (ivec2 uv) 0)) * pp.bloom.rgb + pp.bloom.w))
 
-(wgsl/defun ^:feature vignette [c :vec3 uv :vec2]
+(wgsl/defun ^:feature vignette :vec3 [c :vec3 uv :vec2]
   (let [intensity  pp.vignette-params.x
         roundness  pp.vignette-params.y
         smoothness pp.vignette-params.z
@@ -414,49 +390,49 @@
         center     (vec2 0.5)
         dist ((abs (uv - center)) * intensity)
         dist (vec2 (dist.x * roundness) dist.y)
-        f    (pow (saturate (1 - (dot dist dist))) smoothness)]
+        f    (pow (clamp (1 - (dot dist dist)) 0 1) smoothness)]
     (c * (mix color (vec3 1) f))))
 
-(wgsl/defun ^:feature color-grading [c :vec3]
+(wgsl/defun ^:feature color-grading :vec3 [c :vec3]
   (as-> c x
     (linear->srgb x)
-    (texture-load grading-lut x 0)
+    (texture-load grading-lut (ivec3 x) 0)
+    (.rgb x)
     (srgb->linear x)))
 
-(wgsl/defun ^:feature chromatic-aberration [uv :vec2]
+(wgsl/defun ^:feature chromatic-aberration :vec3 [uv :vec2]
   #_{:off (screen-color uv)
    :on _}
   (let [coord (2 * uv - 1)
         end   (uv - coord * (dot coord coord) * pp.chroma)
         delta ((end - uv) / 3)
-        x (texture-load screen-tex uv)
-        y (texture-load screen-tex (distort-uv (uv + delta)))
-        z (texture-load screen-tex (distort-uv (uv + delta * 2)))]
+        x (texture-load screen-tex (ivec2 uv) 0)
+        y (texture-load screen-tex (ivec2 (distort-uv (uv + delta))) 0)
+        z (texture-load screen-tex (ivec2 (distort-uv (uv + delta * 2))) 0)]
     (vec3 x.r y.g z.b)))
 
-(wgsl/defun ^:feature grain [c :vec3 uv :vec2]
+(wgsl/defun ^:feature grain :vec3 [c :vec3 uv :vec2]
   (let [intensity pp.grain.x
         response  pp.grain.y
-        g (texture-load grain-tex (uv * pp.grain-st.xy + pp.grain-st.zw) 0)
+        g (texture-load grain-tex (ivec2 (uv * pp.grain-st.xy + pp.grain-st.zw)) 0)
         g ((g.x - 0.5) * 2.0)
         l (mix 1 (1 - (sqrt (luminance c))) response)]
     (c + c * g * intensity * l)))
 
-(wgsl/deftexture cell-out MODEL 0 :view-2d :f32)
+(comment
+  (wgsl/defkernel post-process [8 8]
+    (let [uv (distort-uv (vec2 global-invocation-id.xy))]
+      (-> (chromatic-aberration uv)
+          (bloom uv)
+          (tonemap)
+          (vignette uv)
+          (color-grading)
+          (grain uv)
+          (vec4 1)
+          (->> (texture-store cell-out (ivec2 uv))))))
 
-(wgsl/defkernel post-process [8 8]
-  (let [uv (distort-uv global-invocation-id.xy)]
-    (-> (chromatic-aberration uv)
-        (bloom uv)
-        (tonemap)
-        (vignette uv)
-        (color-grading)
-        (grain uv)
-        (vec4 1)
-        (->> (texture-store cell-out uv)))))
-
-(wgsl/defkernel bloom-prefilter [8 8]
-  )
+  (wgsl/defkernel bloom-prefilter [8 8]
+    ))
 
 ;; WGSL doesnt allow user-defined const functions
 ;;
@@ -476,40 +452,41 @@
            (do ; full clojure here -> arguments can be symbols, keywords, maps, vectors, etc
              `(1 + 2)))) ; "wgsl" code emitted
 
-(wgsl/defkernel blur-h [8 8]
-  )
+(comment
+  (wgsl/defkernel blur-h [8 8]
+    )
 
-(wgsl/defkernel blur-v [8 8]
-  ;; this is cool, but not elegant; and defmacro is either in another file or a cljc one
-  ;; need a `wgsl/defunc` to solve this -> just need to implement `constexpr` functions
-  (clojure.tools.macro/macrolet
-      [(sample [uv sign y]
-         `(~'texture-sample screen-tex (~uv ~sign (~'vec2 0 ~y))))]
-    ;; just want to write coefficient literals and specify the filter's schema
-    ;; - generate *everything* else (spec macro : schema -> implementation)
-    ;; - use composable language we all understand -> just expose the mental model
-    ;; - yields the very code which would be hand-crafted; every step is pure & independently tested
-    ;;   - readability & simplicity more important -> communicates intent
-    ;;   - "show me your flowchart and conceal your tables" -> give me your domain specs and conceal your implementations
-    (let [sz (->> (texture-dimensions screen-tex 0) .y f32 (/ 1))
-          uv global-invocation-id.xy
-          c0 (sample uv - 3.23076923)
-          c1 (sample uv - 1.38461538)
-          c2 (texture-sample screen-tex uv)
-          c3 (sample uv + 1.38461538)
-          c4 (sample uv + 3.23076923)
-          c  (+ (c0.rgb * 0.07027027)
-                (c1.rgb * 0.31621622)
-                (c2.rgb * 0.22702703)
-                (c3.rgb * 0.31621622)
-                (c4.rgb * 0.07027027))]
-      (texture-store cell-out uv c))))
+  (wgsl/defkernel blur-v [8 8]
+    ;; this is cool, but not elegant; and defmacro is either in another file or a cljc one
+    ;; need a `wgsl/defunc` to solve this -> just need to implement `constexpr` functions
+    (clojure.tools.macro/macrolet
+        [(sample [uv sign y]
+           `(~'texture-sample screen-tex (~uv ~sign (~'vec2 0 ~y))))]
+      ;; just want to write coefficient literals and specify the filter's schema
+      ;; - generate *everything* else (spec macro : schema -> implementation)
+      ;; - use composable language we all understand -> just expose the mental model
+      ;; - yields the very code which would be hand-crafted; every step is pure & independently tested
+      ;;   - readability & simplicity more important -> communicates intent
+      ;;   - "show me your flowchart and conceal your tables" -> give me your domain specs and conceal your implementations
+      (let [sz (->> (texture-dimensions screen-tex 0) .y f32 (/ 1))
+            uv global-invocation-id.xy
+            c0 (sample uv - 3.23076923)
+            c1 (sample uv - 1.38461538)
+            c2 (texture-sample screen-tex uv)
+            c3 (sample uv + 1.38461538)
+            c4 (sample uv + 3.23076923)
+            c  (+ (c0.rgb * 0.07027027)
+                  (c1.rgb * 0.31621622)
+                  (c2.rgb * 0.22702703)
+                  (c3.rgb * 0.31621622)
+                  (c4.rgb * 0.07027027))]
+        (texture-store cell-out uv c))))
 
-(wgsl/defkernel upsample [8 8]
-  (let [uv global-invocation-id.xy
-        hi (texture-load screen-tex uv 0)
-        lo (texture-load input-tex  uv 0)]
-    (texture-store cell-out uv (vec4 (mix hi.rgb lo.rgb pp.scatter) 1))))
+  (wgsl/defkernel upsample [8 8]
+    (let [uv global-invocation-id.xy
+          hi (texture-load screen-tex uv 0)
+          lo (texture-load input-tex  uv 0)]
+      (texture-store cell-out uv (vec4 (mix hi.rgb lo.rgb pp.scatter) 1)))))
 
 
 (comment
@@ -520,16 +497,16 @@
     (wgsl/compile post-process)
     )
 
-(js/console.log screen-pos.wgsl)
-(js/console.log rgb->hsv.wgsl)
-(js/console.log distribution-ggx.wgsl)
-(js/console.log geometry-smith.wgsl)
-(js/console.log fresnel-schlick.wgsl)
-(js/console.log lighting.wgsl)
-(js/console.log lighting-cs.wgsl)
-(js/console.log window-depth.wgsl)
-(js/console.log distort-uv.wgsl)
-(js/console.log lighting-cs)
+  (js/console.log screen-pos.wgsl)
+  (js/console.log rgb->hsv.wgsl)
+  (js/console.log distribution-ggx.wgsl)
+  (js/console.log geometry-smith.wgsl)
+  (js/console.log fresnel-schlick.wgsl)
+  (js/console.log lighting.wgsl)
+  (js/console.log lighting-cs.wgsl)
+  (js/console.log window-depth.wgsl)
+  (js/console.log distort-uv.wgsl)
+  (js/console.log lighting-cs)
   )
 
 #_

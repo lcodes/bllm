@@ -406,7 +406,7 @@
   (binding-type sym [:float :unfilterable-float :depth :sint :uint]))
 
 (defnode defstorage
-  [sym group bind type access]
+  [sym group bind view texel access]
   (binding-type sym [:write-only]))
 
 (defnode defsampler
@@ -915,7 +915,9 @@
                    :else      "let")))
     (print \space)
     (pr-name node)
-    ;; TODO type tag
+    (when-let [tag (:tag (meta (:name node)))]
+      ;; TODO infer type
+      (print " :" tag))
     (if is-block?
       (do (semicolon)
           (when (needs-indent? init)

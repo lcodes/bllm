@@ -19,6 +19,9 @@
 (defctor vec3 {:bllm.wgsl/expr "vec3<f32>"} [])
 (defctor vec4 {:bllm.wgsl/expr "vec4<f32>"} [])
 
+(defctor ivec2 {:bllm.wgsl/expr "vec2<i32>"} [])
+(defctor ivec3 {:bllm.wgsl/expr "vec3<i32>"} [])
+
 (defctor mat2 {:bllm.wgsl/expr "mat2<f32>"} [])
 (defctor mat3 {:bllm.wgsl/expr "mat3<f32>"} [])
 (defctor mat4 {:bllm.wgsl/expr "mat4<f32>"} [])
@@ -95,7 +98,7 @@
 (defmath refract)
 (defmath reverse-bits)
 (defmath round)
-(defmath saturate)
+(defmath saturate) ; FIXME present in WGSL spec but unspecified in Brave?
 (defmath sign)
 (defmath sin)
 (defmath sinh)

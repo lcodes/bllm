@@ -1,11 +1,15 @@
 (ns bllm.time
   "Sandboxed time. Because of Spectre we're down to millisecond precision."
-  (:require [bllm.util :refer [def1]]))
+  (:require [bllm.util :refer [def1]]
+            [bllm.util :as util]))
+
+(def1 frame-number 0)
 
 (def1 unscaled-now   0)
 (def1 unscaled-delta 0)
 
 (defn pre-tick []
+  (util/inc! frame-number)
   (let [time (js/performance.now)]
     (set! unscaled-delta (- time unscaled-now))
     (set! unscaled-now time))
