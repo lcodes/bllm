@@ -146,7 +146,6 @@
 (wgsl/defbuiltin sample-mask-in       :fragment :in  :u32 {:name "sample_mask"})
 (wgsl/defbuiltin sample-mask          :fragment :out :u32)
 
-
 (wgsl/defvertex-attr local-position 0 :vec3
   "Unpacked vertex position in model space.")
 

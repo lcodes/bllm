@@ -119,17 +119,26 @@
   (str "@group(" node.group ") @binding(" node.bind ") var"
        address-space " " node.name " : " type ";"))
 
-(defn- emit-var [node address-space type-fn]
-  (emit-bind node address-space (type-fn node)))
+(defn- emit-var
+  ([node emit-type]
+   (emit-bind node "" (emit-type node)))
+  ([node address-space emit-type]
+   (emit-bind node (address-space node) (emit-type node))))
 
-(defn- uniform-type [t]
-  (str t.name "_t"))
+(defn- buffer-type [node]
+  (case node.type
+    gpu/uniform           "<uniform>"
+    gpu/storage           "<storage,write>"
+    gpu/read-only-storage "<storage,read>"))
+
+(defn- uniform-type [node]
+  (str node.name "_t"))
 
 ;;      dynamic offset
 ;;      min-binding-size -> ::size
 (defwgsl buffer [group bind type info]
-  (emit-struct "_t") ; TODO support primitive uniforms?
-  (emit-var "<uniform>" uniform-type)) ; TODO storage
+  (emit-struct "_t")
+  (emit-var buffer-type uniform-type))
 
 (defn- texture-suffix [view]
   (case view
@@ -152,21 +161,23 @@
        \< (gpu/texture-format node.texel)
        \, (gpu/storage-access node.access) \>))
 
-;; TODO multisampled
+(defn- sampler-type [node]
+  (if (= node.type gpu/comparison)
+    "sampler_comparison"
+    "sampler"))
+
 (defwgsl texture [group bind view type sample]
-  (emit-var "" texture-type))
+  (emit-var texture-type))
 
 (defwgsl storage [group bind view texel access type]
-  (emit-var "" storage-type))
+  (emit-var storage-type))
 
 (defwgsl sampler [group bind type]
-  (emit-bind "" (if (= type gpu/comparison)
-                  "sampler_comparison"
-                  "sampler")))
+  (emit-var sampler-type))
 
+;; TODO multisampled
 (defn- emit-io [node]
-  (str "@location(" (if (neg? node.bind) "" node.bind) ") "
-       node.name " : " (gpu/prim-type node.type)))
+  (str "@location(" node.bind ") " node.name " : " (gpu/prim-type node.type)))
 
 (defn- emit-builtin [node]
   (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
@@ -230,12 +241,6 @@
 (def1 ^:private deps "Shader node dependents."  (js/Map.)) ; ID -> (js/Set ID)
 (def1 ^:private mods "Shader modules." (js/Map.)) ; Handle -> js/GPUShaderModule
 
-(def1 ^:private requests
-  "An array of pipeline requests. Used to populate `entry-ids`.
-
-  Only references `Compute` and `Render` nodes."
-  #js [])
-
 (def1 ^:private dirty-ids
   "A set of IDs to the shader nodes modified since the last tick.
 
@@ -249,7 +254,8 @@
   (js/Set.))
 
 (comment (js/console.log defs)
-         (js/console.log deps))
+         (js/console.log deps)
+         (js/console.log mods))
 
 (defn empty-io []
   nil)
@@ -293,7 +299,7 @@
   "Registers a shader graph node definition."
   [^object node]
   ;; Old node (dev only)
-  (when-let [existing (.get defs node.uuid)]
+  (if-let [existing (.get defs node.uuid)]
     (if (= existing.hash node.hash)
       (cond (state? node) (set! (.-gpu node) existing.gpu)
             (entry? node) (set! (.-mod node) existing.mod))
@@ -302,7 +308,8 @@
                 (entry? node) (gpu/try-destroy node.gpu))
           (when-let [old-deps existing.deps]
             (util/docoll [id old-deps]
-              (.delete (.get deps id) node.uuid))))))
+              (.delete (.get deps id) node.uuid)))))
+    (.add dirty-ids node.uuid)) ; Will create GPU states for the first time.
   ;; New node
   (.set defs node.uuid node)
   (when-let [new-deps node.deps]
@@ -344,21 +351,24 @@
               (let [grp (.get defs id)] grp.gpu))))
     (gpu/pipeline-layout node.uuid groups)))
 
-;; TODO `gpu/tier-state` needs to tick after module creation
 (defn- compute-pipeline [node]
+  #_(gpu/compute )
   #_(gpu/compute-pipeline ))
 
 (defn- render-pipeline [node]
+  #_(gpu/vertex )
+  #_(gpu/fragment )
   #_(gpu/render-pipeline ))
 
 (defn- reg-gpu [^object node ctor]
+  (assert (nil? node.gpu))
   (gpu/register (gpu-tier node.kind) node.uuid node.hash
                 (fn get []       (.-gpu node))
                 (fn set [] (set! (.-gpu node) (ctor node)))))
 
 (defn- reg-mod [^object node]
   (.add entry-ids node.uuid)
-  (set! (.-mod ^object node) time/frame-number))
+  (set! (.-mod node) time/frame-number))
 
 (defn- check-dirty [ids]
   (util/docoll [id ids]
@@ -374,17 +384,10 @@
          Pixel) (reg-mod node)
         nil))))
 
-(defn pre-gpu []
-  (when (pos? (.-size dirty-ids))
-    (check-dirty dirty-ids)
-    (.clear dirty-ids)))
-
-(defn compile [node] ; TODO from pipeline request -> gpu/defres
+;; TODO feature sets -> generated variants -> fit it all in single module
+(defn compile [node]
   (assert (entry? node))
-  (reg-mod node)
-  ;; - variant overrides
-  ;; - return index? (how to get compiled module into gpu pipelines?)
-  )
+  (reg-mod node))
 
 (defn- build-graph [^js/Map g id]
   (let [node (.get defs id)]
@@ -431,6 +434,9 @@
   io)
 
 (defn pre-tick []
+  (when (pos? (.-size dirty-ids))
+    (check-dirty dirty-ids)
+    (.clear dirty-ids))
   (when (pos? (.-size entry-ids))
     (let [g   (-> (to-module entry-ids)
                   (topo-sort util/temp-array))

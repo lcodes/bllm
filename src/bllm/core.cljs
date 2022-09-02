@@ -29,13 +29,17 @@
 (defn pre-tick
   "Ticks the input systems."
   []
-  (time/pre-tick)
-  ;;(input/pre-tick)
+  ;; Time-independent input systems. Flushes into low-level sub-systems.
   (disp/pre-tick)
-  (wgsl/pre-gpu)
-  (gpu/pre-tick)
+
+  ;; Create or update WGSL shader nodes and GPU objects marked dirty.
+  ;; NOTE Before ticking time, to collect inter-frame events as well.
   (wgsl/pre-tick)
-  )
+  (gpu/pre-tick)
+
+  ;; Time-dependent input systems. Flushes into high-level sub-systems.
+  (time/pre-tick)
+  (input/pre-tick))
 
 (defn tick
   "Ticks the simulation systems."

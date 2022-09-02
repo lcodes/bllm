@@ -1,7 +1,6 @@
 (ns bllm.time
   "Sandboxed time. Because of Spectre we're down to millisecond precision."
-  (:require [bllm.util :refer [def1]]
-            [bllm.util :as util]))
+  (:require [bllm.util :as util :refer [def1]]))
 
 (def1 frame-number 0)
 
