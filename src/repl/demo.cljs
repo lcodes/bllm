@@ -152,13 +152,97 @@
 (wgsl/defbuiltin sample-mask-in       :fragment :in  :u32 {:name "sample_mask"})
 (wgsl/defbuiltin sample-mask          :fragment :out :u32)
 
+;; TODO packed variants of these
 (wgsl/defvertex-attr local-position 0 :vec3
   "Unpacked vertex position in model space.")
+
+(wgsl/defvertex-attr local-tangent1    1 :vec3)
+(wgsl/defvertex-attr local-tangent2    2 :vec3)
+(wgsl/defvertex-attr vertex-color      3 :vec4)
+(wgsl/defvertex-attr vertex-texcoord   4 :vec2)
+(wgsl/defvertex-attr vertex-texcoord3d 4 :vec3)
+(wgsl/defvertex-attr vertex-texcoord12 4 :vec4)
+(wgsl/defvertex-attr vertex-texcoord34 5 :vec4)
+(wgsl/defvertex-attr bone-weights      6 :vec4)
+(wgsl/defvertex-attr bone-indices      7 :uvec4)
+
+(wgsl/defvertex-attr instance-mvp 8  :mat4)
+(wgsl/defvertex-attr instance-col 12 :mat4)
 
 (wgsl/defdraw-target frag-color 0 :vec4
   "Generic fragment draw target.")
 
 (wgsl/definterpolant io-texcoord-3d 0 :vec3)
+
+
+(comment
+  ;; struct-of-array vs array-of-structs -> buffer layout -> interleave attribs or back to back arrays
+  ;; - dont want to care, automate layout, test both, measure
+  ;;
+  ;; losing expressivity here; can we define streams and targets as structs-like constructs?
+  ;; - elements are first class defs, would like to keep that (tho could also define symbols without)
+  ;;
+  ;; streams more complex -> made of inner buffers, both have props shaders dont care about
+  ;; - these props dont usually change without associated shader changes, however; ie packing
+  ;; - layout: array-stride, step-mode
+  ;; - attrib: format, offset, location
+  ;;
+  ;; - vertex stage only needs to know wgsl type and location.
+  ;; - everything else is pipeline-specific, to reuse shaders.
+  ;;
+  ;; - allow stream to be attached to both? if none on pipeline lookup shader -> override mechanism
+
+  (wgsl/defstream basic-mesh
+    ;; can compute stride & offsets -> sum all components, account for alignment
+    ;; - step mode can be attached to attrib
+    [local-position :snorm16x4])
+
+  [attrib & overrides ...] ?
+  [sym kw kw kw sym kw kw]
+
+  ;; compute array-stride & offsets at render pipeline creation (compute at render.. hmm)
+
+  ;; OVERRIDE attributes?
+  ;; - ie want local-position with different vertex-format
+  ;;   - dont want different set of shaders because CPU-side meta changes
+  ;;     - then just specify set of attributes & get all gpu/cpu data from single node, without changing shaders
+  ;;       - need new Indirect node
+
+  ;; want more reuse, need more info
+  ;; - attribs -> individual "fields" read by vertex shader -> format gives type, offset computed, location given/sliced
+  ;;   - buffers -> input from vertex buffers -> stride, step mode
+  ;;     - streams -> meta-data for render-pipeline descriptor -> array of buffers
+  (wgsl/defstream full-mesh
+
+    [local-position
+     local-tangent1
+     local-tangent2
+     vertex-color
+     vertex-texcoord])
+
+  (wgsl/defstream instanced-mesh
+    full-mesh
+    [local-transform])
+
+  (wgsl/defdraw-target frag-color 0 :vec4)
+
+ ;; ATTACH BLEND STATE HERE -> ATTACH TARGET TO PIXEL -> HELL YEAH
+  (wgsl/deftarget base-out
+    [frag-color :rgba8unorm])
+
+  (wgsl/deftarget final-out
+    [frag-color :bgra8unorm]) ; TODO can we link that one to the dynamically resolved preferred device format?
+
+  (wgsl/deftarget g-out
+    (wgsl/defdraw-target g-albedo   :rgba8unorm-srgb) ; no blend, infer :vec4
+    (wgsl/defdraw-target g-normal   :rgb10a2unorm)
+    (wgsl/defdraw-target g-emissive :rgba16float)
+    (wgsl/defdraw-target g-props    :rgba8uint)) ; infer :uvec4
+
+  (wgsl/deftarget translucent-out
+    [frag-color :rgba16float blend-translucent]
+    )
+  )
 
 (wgsl/deftexture tex-skybox EFFECT 0 :view-cube :f32)
 

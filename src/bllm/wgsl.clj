@@ -377,6 +377,12 @@
 (defio defdraw-target "Defines an output from the fragment stage."    "out")
 (defio definterpolant "Defines an I/O channel between render stages." "io")
 
+(defnode defindirect
+  "Redefines the CPU-side meta-data of a vertex-attr or draw-target."
+  {:kind :indirect-IO}
+  [sym ref & overrides]
+  )
+
 
 ;;; Resources - Buffer Views, Texture Views & Samplers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

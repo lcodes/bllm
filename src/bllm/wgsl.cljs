@@ -29,6 +29,7 @@
   Builtin
   VertexAttr
   DrawTarget
+  IndirectIO ; TODO better naming, "overrides" a vertexattr/drawtarget with different cpu-side meta-data for pipeline -> no wgsl, deps on original
   Interpolant
   GeneratedIO
   ;; Resources Definitions
@@ -182,9 +183,11 @@
 (defn- emit-builtin [node]
   (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
 
-(defwgsl vertex-attr [bind type] emit-io)
-(defwgsl draw-target [bind type] emit-io)
 (defwgsl interpolant [bind type] emit-io)
+(defwgsl vertex-attr [bind type] emit-io)
+(defwgsl draw-target [bind type] emit-io) ; blend is given as a dependency
+(defwgsl indirect-IO [type])
+
 (defwgsl builtin [stage dir type] emit-builtin)
 
 (defgpu primitive)
@@ -354,7 +357,7 @@
 
 (defn- shader [stage id arg]
   (if-let [node (.get defs id)]
-    (stage (.get mods node.mod) node.name arg)
+    (stage (.get mods node.mod) node.name (arg node))
     (stage js/undefined "" (util/array))))
 
 (defn- auto-layout [node]
@@ -365,7 +368,7 @@
 
 (defn- compute-pipeline [node]
   (assert (= Compute node.kind))
-  (shader gpu/compute   node.kernel nil)
+  (shader gpu/compute   node.kernel identity)
   (gpu/compute-pipeline node.name (auto-layout node)))
 
 (defn- attr-buffers [node]
@@ -376,9 +379,9 @@
 
 (defn- render-pipeline [node]
   (assert (= Render node.kind))
-  (shader gpu/vertex   node.vertex   (attr-buffers node))
-  (shader gpu/fragment node.fragment (draw-targets node))
-  (gpu/render-pipeline node.name     (auto-layout  node)
+  (shader gpu/vertex   node.vertex   attr-buffers)
+  (shader gpu/fragment node.fragment draw-targets)
+  (gpu/render-pipeline node.name     (auto-layout node)
                        node.primitive
                        node.depth-stencil
                        node.multisample))
