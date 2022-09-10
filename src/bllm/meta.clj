@@ -81,48 +81,63 @@
 ;;; Type Constructors
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- fourcc-elem [i ch]
+  (bit-shift-left (int ch) (* 8 i)))
+
+(defn- fourcc [x]
+  (let [s (name x)]
+    (when (< 4 (.length s))
+      (throw (ex-info "Invalid FourCC identifier." {:fourcc x})))
+    (->> (map-indexed fourcc-elem s)
+         (reduce bit-or))))
+
+(comment (fourcc :JSON))
+
 (defm defenum
   "An enumerated type whose domain set is explicitly specified."
   [sym & elems]
   (let [m    (meta sym)
         rev? (:reverse m)
         dir  (if rev? dec inc)
-        repr (when (and (<= 2 (count elems))
-                        (or (keyword? (second elems))
-                            (string?  (second elems))))
-               (partition 2 elems))
-        xs (loop [elems (if repr (map first repr) elems)
-                  value (if rev? -1 0)
-                  xs    ()]
-             (if-not elems
-               (reverse xs)
-               (let [x (first elems)
-                     v (if (vector? x) (second x) value)
-                     s (if (vector? x) (first  x) x)]
-                 (recur (next elems)
-                        (long (dir v))
-                        (conj xs [s v])))))]
+        val? (and (<= 2 (count elems)) (not (symbol? (second elems))))
+        repr (when val? (partition 2 elems))
+        view (:repr m)
+        xs (cond
+             (and val? (number? (second elems))) repr
+             (= :fourcc view) (map #(vector % (fourcc %)) elems)
+             :else (loop [elems (if repr (map first repr) elems)
+                          value (if rev? -1 0)
+                          xs    ()]
+                     (if-not elems
+                       (reverse xs)
+                       (let [x (first elems)
+                             v (if (vector? x) (second x) value)
+                             s (if (vector? x) (first  x) x)]
+                         (recur (next elems)
+                                (long (dir v))
+                                (conj xs [s v]))))))]
     `(do
        ;; Emit each enumerated element as a separate constant definition.
        ~@(for [[sym val] xs]
            `(util/defconst ~sym ~val))
        ;; When a representation is requested, emit a conversion function.
-       ~(when-let [repr-type (:repr m)]
-          (assert (= repr-type :string)) ; TODO support more?
+       ~(when (and view (not= :fourcc view))
           `(defn ~sym [~'x]
              (case ~'x
-               ~@(let [prefix (some-> (:prefix m) name)
-                       offset (some-> prefix count)]
-                   (util/flatten1
-                    (for [n (range (count xs))
-                          :let [x (nth xs n)
-                                s (name (if repr
-                                          (second (nth repr n))
-                                          (first x)))]]
-                      [(second x)
-                       (if (and prefix (str/starts-with? s prefix))
-                         (subs s offset)
-                         s)])))))))))
+               ~@(case view
+                   ;; TODO more views?
+                   :string (let [prefix (some-> (:prefix m) name)
+                                 offset (some-> prefix count)]
+                             (util/flatten1
+                              (for [n (range (count xs))
+                                    :let [x (nth xs n)
+                                          s (name (if repr
+                                                    (second (nth repr n))
+                                                    (first x)))]]
+                                [(second x)
+                                 (if (and prefix (str/starts-with? s prefix))
+                                   (subs s offset)
+                                   s)]))))))))))
 
 (comment (defenum test-me {:repr :string :prefix hi-}
            hi-a hi-b hi-c))

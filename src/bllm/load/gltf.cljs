@@ -10,64 +10,48 @@
 ;; TODO https://github.com/google/draco#javascript-decoder-api
 
 
-(comment
-  (meta/defenum gl
-    {:repr :number} ; TODO don't generate enum->string, but number->enum function
-    unsigned-short       0x1403
-    float                0x1406
-    array-buffer         0x8892
-    element-array-buffer 0x8893
-    ))
+(meta/defenum gl
+  unsigned-short       0x1403
+  float                0x1406
+  array-buffer         0x8892
+  element-array-buffer 0x8893)
 
-(comment
+(defn- finalize [contents]
+  (js/console.log contents))
 
-  (meta/defstruct Header
-    [magic   :u32]
-    [version :u32]
-    [length  :u32])
-
-  (meta/defstruct Chunk
-    [length :u32]
-    [type   :u32]
-    [data   [:u32]])
-
-  (meta/defenum chunk-type
-    {:repr :fourcc} ; TODO generate magic number from (name sym)
-    JSON 0x4E4F534A
-    BIN  0x004E4942)
-
-  )
-
-;; RESOURCE LAYERS (all entries are named!)
-;; - assets, packages, plugins
-;; - scenes, nodes, hierarchy, transforms
-;; - cameras, materials, animations
-;; - buffers, textures
-
-
+(defn- load-all [task offset uris base-url]
+  (when uris
+    (util/doarray [desc n uris]
+      (aset task (+ offset n) (data/import desc.uri)))))
 
 (data/defimport asset
+  "The main asset of glTF, whether loaded directly or embedded in a `glb` file.
+
+  Contains references to other files, namely buffers and images. Importing such
+  an `asset` effectively creates a bunch of interlinked assets in the database.
+
+  These entries can be divided in two categories:
+  - system resources provide content to their respective application domain.
+  - entity components fill the simulation world and batch update each frame.
+
+  System resources are scenes, meshes, materials, skins and animations.
+
+  Entity components contain the models, lights, cameras, world transforms and
+  parent hierarchies. Stored inside a scene, which is also a system resource."
   {:extension "gltf"
    :media-type "model/gltf+json"}
   [url json]
-  (js/console.log json)
   (let [info json.asset]
-    )
-
-  (util/doarray [buf json.buffers]
-    )
-  ;; accessors, bufferViews, buffers -> meshes
-  ;; images, materials, textures, samplers
-  ;; scene, scenes, nodes, cameras
-
-
-
-  ;; asset info -> into this file
-  ;; scenes -> separate files
-  ;;   nodes -> inside scenes, references other imported files
-  ;; materials -> could already be imported -> need a matching shader technique as well
-  ;; textures -> defer to image importer (could already imported too, loopback through `data/import`)
-  )
+    (if (not= "2.0" info.version)
+      (js/Promise.reject "Unsupported glTF (version 1.0)")
+      (let [bufs json.buffers
+            imgs json.images
+            num  (count bufs)
+            task (aget util/arrays-a (+ 1 num (count imgs)))]
+        (load-all task 1         bufs url) ;; TODO can be embedded base64, or reference to glb chunk
+        (load-all task (+ 1 num) imgs url) ;; TODO hint with material usage -> match import preset
+        (aset task 0 json) ; TODO compute as much as possible while resources are downloading
+        (-> task js/Promise.all (.then finalize))))))
 
 (data/defimport buffer
   "Loads the `bin` associated with a `glTF` asset. Contains, well, binary data:
@@ -79,12 +63,35 @@
    :media-types ["application/octet-stream"
                  "application/gltf-buffer"]}
   [url data]
-  )
+  ;; TODO passed hints to locate packing preset
+  ;; - pack & interleave vertex components
+  ;; - extract skeleton & skin
+  ;; - prepare animation timelines?
+  data)
+
+(comment
+  (meta/defstruct Header
+    [magic   :u32]
+    [version :u32]
+    [length  :u32])
+
+  (meta/defstruct Chunk
+    [length :u32]
+    [type   :u32]
+    [data   [:u32]]))
+
+(meta/defenum chunk-type
+  {:repr :fourcc}
+  JSON
+  BIN)
 
 (data/defimport binary
+  "Single file download containing the `glTF` and the `bin`, `jpg` and `png` files
+  it references. Stored in chunks instead of base64 encoding to save storage space."
   {:extension "glb"
    :media-type "model/gltf-binary"}
   [url data]
+  (js/console.log data)
   )
 
 (comment with thanks to "https://github.com/KhronosGroup/glTF-Sample-Models"

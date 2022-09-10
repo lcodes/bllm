@@ -30,6 +30,10 @@
                             (put 'defio                 'clojure-doc-string-elt 2)
                             (put 'defstate              'clojure-doc-string-elt 2)
                             ;; namespaced
+                            (put 'data/defimport        'clojure-doc-string-elt 2)
+                            (put 'data/defstore         'clojure-doc-string-elt 2)
+                            (put 'ecs/defc              'clojure-doc-string-elt 2)
+                            (put 'ecs/defsys            'clojure-doc-string-elt 2)
                             (put 'gpu/defres            'clojure-doc-string-elt 2)
                             (put 'wgsl/defprimitive     'clojure-doc-string-elt 2)
                             (put 'wgsl/defstencil-face  'clojure-doc-string-elt 2)

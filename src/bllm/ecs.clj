@@ -2,10 +2,10 @@
   (:require [bllm.util :refer [defm]]))
 
 (defm defc
-  [sym]
-  )
+  [sym & args]
+  `(def ~sym "TODO"))
 
-(defm defsystem
-  [sym]
+(defm defsys
+  [sym & args]
   `(defn ~sym []
      ))

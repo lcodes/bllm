@@ -6,6 +6,12 @@
 
 (set! *warn-on-infer* true)
 
+;; TODO LZ4 wasm worker to pack/unpack blobs -> limit blobs to transferable types
+;; - loading data in worker then passing around would deep clone it, bad
+;; - anything loaded into shared array buffers is also fair game
+;;   - ideally build systems upon these, modular closure output to lazy load same code in workers
+;;   - getting a figwheel client into workers will be fun, all in one emacs cider REPL session
+
 
 ;;; IndexedDB
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -104,7 +110,8 @@
 ;; neat:
 ;; - also drives/helps the design of both loader, renderer and the ECS in between
 ;; - also fairly close to gltf structure; textures always separate but thats fine, they large
-;; -
+;;   - not entirely true, textures can be in array blobs -> load multiple slices of multiple textures in 1 async op
+;;   - again, one gpu upload -> compute shader to place things in proper place? in "theory" is faster
 
 (data/defstore Blob
   "Unit of content loading."
