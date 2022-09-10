@@ -81,6 +81,12 @@
 (defn js-sym [ident]
   (symbol "js" ident))
 
+(defn named->enum
+  ([ns x]
+   (named->enum ns x nil))
+  ([ns x prefix]
+   (symbol (name ns) (str prefix (name x)))))
+
 (defn keyword->enum
   "Converts keywords to the matching constants."
   ([ns x]
@@ -88,14 +94,12 @@
   ([ns x prefix]
    (if-not (keyword? x)
      x
-     (-> (namespace x)
-         (or ns)
-         (name)
-         (symbol (str prefix (name x)))))))
+     (named->enum (or ns (namespace x)) x prefix))))
 
 (def ns-gpu  "bllm.gpu")
 (def ns-lib  "bllm.base")
 (def ns-wgsl "bllm.wgsl")
+(def ns-data "bllm.data")
 
 (def keyword->gpu  (partial keyword->enum ns-gpu))
 (def keyword->wgsl (partial keyword->enum ns-wgsl))
@@ -144,6 +148,16 @@
   (mapv #(.repeat " " (* 2 %)) (range 16)))
 
 (comment (spaces 2))
+
+(defn unique-id
+  ([sym]
+   (unique-id (str *ns*) (name sym)))
+  ([ns sym]
+   (assert (string? ns))
+   (assert (string? sym))
+   (let [h (bit-xor (hash ns) (hash sym))] ; Poor man's deterministic ID.
+     (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
+     h)))
 
 
 ;;; Conditional Compilation -> Matching the different build profiles.

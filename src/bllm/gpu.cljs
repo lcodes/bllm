@@ -614,8 +614,7 @@
   blue
   alpha)
 
-(defconst color-write-all
-  (bit-or red green blue alpha))
+(defconst RGBA (bit-or red green blue alpha))
 
 (defenum stencil-operation
   {:repr :string}
@@ -672,6 +671,23 @@
   {:repr :string :prefix step-}
   step-vertex
   step-instance)
+
+(defbind vertex-buffer-layout
+  {:index true}
+  [arrayStride :u64]
+  [stepMode    vertex-step-mode]
+  [attributes  [::vertex-attribute]])
+
+(defbind vertex-attribute
+  [shaderLocation :i32]
+  [format         vertex-format]
+  [offset         :u64])
+
+(defbind color-target
+  {:index true}
+  [format    texture-format]
+  [blend     ::blend-state]
+  [writeMask ::color-write])
 
 (defgpu command-encoder)
 
@@ -803,7 +819,11 @@ fn frag() -> @location(0) vec4<f32> {
   preferred-format)
 
 (defn html-setup-target [^js/GPUCanvasContext ctx ^js/GPUCanvasConfiguration cfg]
-  (.configure ctx cfg))
+  (.configure ctx #js {:device device
+                       :format preferred-format
+                       :usage render-attachment
+                       :colorSpace "srgb"
+                       :alphaMode "opaque"}))
 
 (defn ^js/GPUCanvasConfiguration html-render-target
   [^js/HTMLCanvasElement canvas]

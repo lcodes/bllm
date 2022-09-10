@@ -31,3 +31,13 @@
   (let [enc nil]
     ;; end enc
     (gpu/submit-1 (.finish enc))))
+
+;; pass types
+;; - system -> shader
+;; - effect -> tech -> shader
+;; - matter -> tech -> mesh -> shader
+
+;; realization:
+;; - unless strict artistic requirement to produce same size textures
+;; - hard to batch textures, as means is 2d arrays, or the slices of
+;;

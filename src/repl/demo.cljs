@@ -13,8 +13,6 @@
 ;; - right now just porting old WebGL2 code, need to push that wgsl codegen
 ;; - plan is to get working pipelines, gpu resources, then simplify, then move
 
-
-
 (wgsl/defconst E    2.7182818284590452)
 (wgsl/defconst PI   3.1415926535897932)
 (wgsl/defconst PI-2 1.5707963267948966)
@@ -50,6 +48,9 @@
   (wgsl/defsampler linear-repeat))
 
 (wgsl/defstorage cell-out MODEL 0 :view-2d :rgba8unorm :write)
+(wgsl/defgroup cell-io
+  PASS
+  cell-out)
 
 (wgsl/defgroup post-data ;; TODO simplify, compose with generic bindings
   EFFECT
@@ -153,27 +154,58 @@
 (wgsl/defbuiltin sample-mask          :fragment :out :u32)
 
 ;; TODO packed variants of these
-(wgsl/defvertex-attr local-position 0 :vec3
+(wgsl/defattrib local-position 0 :vec3
   "Unpacked vertex position in model space.")
 
-(wgsl/defvertex-attr local-tangent1    1 :vec3)
-(wgsl/defvertex-attr local-tangent2    2 :vec3)
-(wgsl/defvertex-attr vertex-color      3 :vec4)
-(wgsl/defvertex-attr vertex-texcoord   4 :vec2)
-(wgsl/defvertex-attr vertex-texcoord3d 4 :vec3)
-(wgsl/defvertex-attr vertex-texcoord12 4 :vec4)
-(wgsl/defvertex-attr vertex-texcoord34 5 :vec4)
-(wgsl/defvertex-attr bone-weights      6 :vec4)
-(wgsl/defvertex-attr bone-indices      7 :uvec4)
+(wgsl/defattrib local-tangent1    1 :vec3)
+(wgsl/defattrib local-tangent2    2 :vec3)
+(wgsl/defattrib vertex-color      3 :vec4)
+(wgsl/defattrib vertex-texcoord   4 :vec2)
+(wgsl/defattrib vertex-texcoord3d 4 :vec3)
+(wgsl/defattrib vertex-texcoord12 4 :vec4)
+(wgsl/defattrib vertex-texcoord34 5 :vec4)
+(wgsl/defattrib bone-weights      6 :vec4)
+(wgsl/defattrib bone-indices      7 :uvec4)
 
-(wgsl/defvertex-attr instance-mvp 8  :mat4)
-(wgsl/defvertex-attr instance-col 12 :mat4)
+(wgsl/defattrib instance-mvp 8  :mat4)
+(wgsl/defattrib instance-col 12 :mat4)
 
-(wgsl/defdraw-target frag-color 0 :vec4
+(wgsl/deftarget frag-color 0 :vec4
   "Generic fragment draw target.")
 
+;; TODO specify unpack/pack functions as part of interpolant -> never used without anyways
 (wgsl/definterpolant io-texcoord-3d 0 :vec3)
 
+;; PACKED ATTRIBUTES NEED DIFFERENT EXPR -> dont write to _in/_out directly, tmp vars -> then pack to IO
+;; same in reverse, dont read from _in/_out directly -> unpack to tmp vars, use these as IO exprs
+(comment
+  (wgsl/definterpolant test-io 0 :ivec4
+    :pack test-pack-io ; struct -> ivec4
+    :unpack test-unpack-io) ; ivec4 -> struct
+
+  (wgsl/defattrib local-tangent-packed 1 :ivec4
+    :unpack unpack-tangent ; ivec4 -> tangent space
+    )
+
+  (wgsl/deftarget gbuffer-normal 2 :vec4
+    :pack pack-gbuffer-normal) ; normal, 2-bit value or 2 flags -> rgb10a2
+
+  (wgsl/deftarget gbuffer-properties 3 :ivec4
+    :pack pack-gbuffer-properties) ; material-id, AO, ?? -> ivec4
+
+  ;; hmm, but changes usage; going from local-tangent1/2 to local-tangent-packed changes references
+  ;; - unpack code different, but ideally want entry point to still refer to unpacked local-tangent1/2 ?
+  ;;
+  ;; - at some point, all packed vertex attributes yield the unpacked individual attributes
+  ;; - conversely, all packed draw buffers are made from the unpacked individual outputs
+  ;;
+  ;; one-to-many, many-to-one; declare scalar singletons, groups as product types -> all are "sets", dont need to wrap singleton in set
+  ;;
+  )
+
+;; LAYERS LAYERS LAYERS
+;; - attributes (vertex, IO, pixel)
+;; -
 
 (comment
   ;; struct-of-array vs array-of-structs -> buffer layout -> interleave attribs or back to back arrays
@@ -212,36 +244,83 @@
   ;; - attribs -> individual "fields" read by vertex shader -> format gives type, offset computed, location given/sliced
   ;;   - buffers -> input from vertex buffers -> stride, step mode
   ;;     - streams -> meta-data for render-pipeline descriptor -> array of buffers
-  (wgsl/defstream full-mesh
 
-    [local-position
-     local-tangent1
-     local-tangent2
-     vertex-color
-     vertex-texcoord])
+  ;; IDEA
+  ;; - genIO from the derived GPU types -> hash that (need to move convertion table to CLJ, then generate CLJS)
+  ;; - use those as input/output nodes (add count fields, filter away builtins when transferring to pipeline state)
+  ;; - fragment adds nothing more; vertex tracks step-mode and
+  ;;
+  ;; wait, why stream? just make vertex.in an array -> changes codegen
+  ;; wait again, GenIO will grab ALL attribs, regardless of arrays -> augh
+  ;;
+  ;; BUT if attribs can only be defined as part of
 
-  (wgsl/defstream instanced-mesh
-    full-mesh
-    [local-transform])
+  (wgsl/defstream mesh-stream
+    (wgsl/definput mesh-position
+      [position :unorm16x4])
+    (wgsl/definput mesh-vertex
+      ;; generate function taking buffer + 4 values & packs them; buffer+=stride, repeat
+      [tangent  :float16x4]
+      ;; how to get start index here? previously did it without definput, stream had full view -> not meta-circular here!
+      [normal   :float16x4]
+      [color    :unorm8x4]
+      [texcoord :float16x2]))
 
-  (wgsl/defdraw-target frag-color 0 :vec4)
+  (wgsl/defstream instance-stream
+    mesh-vertex
+    (wgsl/definput instanced-vertex
+      [local-mvp :mat4] ; expands into 4 :vec4 attributes
+      [instance  :uvec4]))
 
- ;; ATTACH BLEND STATE HERE -> ATTACH TARGET TO PIXEL -> HELL YEAH
+  (wgsl/deftarget frag-color 0 :rgba8unorm)
+
+  (wgsl/defattrib local-position 0 :unorm16x4)
+
   (wgsl/deftarget base-out
     [frag-color :rgba8unorm])
 
   (wgsl/deftarget final-out
     [frag-color :bgra8unorm]) ; TODO can we link that one to the dynamically resolved preferred device format?
 
-  (wgsl/deftarget g-out
-    (wgsl/defdraw-target g-albedo   :rgba8unorm-srgb) ; no blend, infer :vec4
-    (wgsl/defdraw-target g-normal   :rgb10a2unorm)
-    (wgsl/defdraw-target g-emissive :rgba16float)
-    (wgsl/defdraw-target g-props    :rgba8uint)) ; infer :uvec4
+  (def blend-translucent 0)
 
-  (wgsl/deftarget translucent-out
-    [frag-color :rgba16float blend-translucent]
+  ;; IDEA: gen vertex packing function, CPU side
+  (wgsl/defstream mesh-instanced
     )
+
+  ;; how is GenIO different from stream/target?
+  ;; - genio has builtins, but not all inputs/outputs will; lots of equivalent genio/stream target/genio pairs
+  ;; - WAIT A SEC
+  ;;
+  ;; genio already has the answer?
+  ;; - impl yields a seq of dependencies as input
+  ;; - route to gen-stream/gen-target instead -> no need, same as gen-io
+  ;;
+  ;; so keep using GenIO
+
+  (wgsl/defoutput g-out
+    (wgsl/deftarget g-albedo   :rgba8unorm-srgb :RGB blend-translucent)
+    (wgsl/deftarget g-normal   :rgb10a2unorm)
+    (wgsl/deftarget g-emissive :rgba16float)
+    (wgsl/deftarget g-props    :rgba8uint))
+  ;; emit separate call to link back buffers to original target?
+
+  ;; Attach frag-color to ldr-out here?
+  ;; - want to quickly infer `ldr-out` on pipeline when `frag-color` is used on fragment
+  ;; - can provide others, like `hdr-out` or `final-out` to pipeline as overrides -> stage ALWAYS has IO, override optional
+  ;; - cant use dependents, thats an unordered set
+  (wgsl/defoutput ldr-out
+    (wgsl/deftarget frag-color :rgba8unorm))
+
+  (wgsl/defoutput translucent-out
+    [frag-color :rgba16float :blend blend-translucent])
+
+  (wgsl/defoutput hdr-out
+    [frag-color :rgba16float])
+
+  (wgsl/defoutput final-out
+    [frag-color :bgra8unorm :mask :RGB]) ; validates frag-color.bind == 0
+
   )
 
 (wgsl/deftexture tex-skybox EFFECT 0 :view-cube :f32)
@@ -252,6 +331,7 @@
 (wgsl/defpixel ps-demo
   (frag-color = (vec4 0.42 0 0.69 1)))
 
+#_
 (wgsl/defrender render-demo vs-demo ps-demo)
 
 (wgsl/defvertex vs-sky
@@ -678,6 +758,7 @@
 
   (wgsl/deflayout l-demo g-frame g-effect)
 
+  #_
   (wgsl/defrender demo-render
     "Assemble the pipeline here, only by composition."
     vs-demo
@@ -874,14 +955,13 @@ fn demo_frag() -> @location(0) vec4<f32> {
 
   (setup-target pass-desc)
   #_(upload-ubo (setup-sine))
-
-  (let [enc (gpu/command-encoder "Demo Frame")
-        cmd (.beginRenderPass enc pass-desc)]
-    #_(.setPipeline cmd render-pipe)
-    #_(.setVertexBuffer cmd 0 vbo)
-    #_(.setBindGroup cmd 0 bind-grp)
-    #_(.draw cmd 3)
-    (.end cmd)
+  (let [enc (gpu/command-encoder "Demo Frame")]
+    (doto (.beginRenderPass enc pass-desc)
+      #_(.setPipeline render-pipe)
+      #_(.setVertexBuffer 0 vbo)
+      #_(.setBindGroup 0 bind-grp)
+      #_(.draw 3)
+      (.end))
     (gpu/submit-1 (.finish enc))))
 
 (comment (js/console.log gpu/device)

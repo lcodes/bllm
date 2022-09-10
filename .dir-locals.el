@@ -39,7 +39,7 @@
                             (put 'wgsl/defblend         'clojure-doc-string-elt 2)
                             (put 'wgsl/defbuiltin       'clojure-doc-string-elt 4)
                             (put 'wgsl/defvertex-attr   'clojure-doc-string-elt 4)
-                            (put 'wgsl/defdraw-target   'clojure-doc-string-elt 4)
+                            (put 'wgsl/defdraw-buffer   'clojure-doc-string-elt 4)
                             (put 'wgsl/definterpolant   'clojure-doc-string-elt 4)
                             (put 'wgsl/defstruct        'clojure-doc-string-elt 2)
                             (put 'wgsl/defbuffer        'clojure-doc-string-elt 2)

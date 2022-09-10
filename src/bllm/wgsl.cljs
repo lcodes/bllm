@@ -27,9 +27,8 @@
   Blend
   ;; I/O Definitions
   Builtin
-  VertexAttr
-  DrawTarget
-  IndirectIO ; TODO better naming, "overrides" a vertexattr/drawtarget with different cpu-side meta-data for pipeline -> no wgsl, deps on original
+  Attribute
+  ColorTarget
   Interpolant
   GeneratedIO
   ;; Resources Definitions
@@ -38,19 +37,22 @@
   Storage
   Sampler
   ;; Code Definitions
-  Struct
   Enum
   Flag
   Const
+  Struct
   Override
   Function
   ;; Stage Definitions (stateful nodes -> preconfigured pipeline stages)
+  Kernel
   Vertex
   Pixel
-  Kernel
   ;; Pipeline Definitions (no WGSL -> high-level, stateful "glue" nodes)
   Group
   Layout
+  Input
+  Output
+  Stream
   Render
   Compute)
 
@@ -87,8 +89,7 @@
   (let [wgsl (str "struct " node.name type-suffix " {\n")]
     (util/doarray [f node.info]
       (str! wgsl "  " f.name " : " (field-type f.type) ",\n"))
-    (str! wgsl "}")
-    wgsl))
+    (str! wgsl "}")))
 
 (defn- emit-fn [node]
   (let [wgsl (str "fn " node.name \()]
@@ -96,8 +97,7 @@
       (when (pos? i)
         (str! wgsl ", "))
       (str! wgsl arg.name " : " (field-type arg.type)))
-    (str! wgsl ") -> " (field-type node.ret) " {\n" node.wgsl \})
-    wgsl))
+    (str! wgsl ") -> " (field-type node.ret) " {\n" node.wgsl \})))
 
 (defwgsl struct [info] (emit-struct ""))
 (defwgsl function [ret args wgsl] emit-fn)
@@ -168,7 +168,7 @@
     "sampler"))
 
 (defwgsl texture [group bind view type sample]
-  (emit-var texture-type))
+  (emit-var texture-type)) ; TODO multisampled
 
 (defwgsl storage [group bind view texel access type]
   (emit-var storage-type))
@@ -176,19 +176,169 @@
 (defwgsl sampler [group bind type]
   (emit-var sampler-type))
 
-;; TODO multisampled
-(defn- emit-io [node]
-  (str "@location(" node.bind ") " node.name " : " (gpu/prim-type node.type)))
+(defn- emit-io [node emit-gpu-type]
+  (str "@location(" node.bind ") " node.name " : " (emit-gpu-type node.type)))
 
 (defn- emit-builtin [node]
   (str "@builtin(" node.name ") _" node.name " : " (gpu/prim-type node.type)))
 
-(defwgsl interpolant [bind type] emit-io)
-(defwgsl vertex-attr [bind type] emit-io)
-(defwgsl draw-target [bind type] emit-io) ; blend is given as a dependency
-(defwgsl indirect-IO [type])
+;; HALF TYPES
+;;
+
+;; MATTER IS A NODE TYPES
+;; - MATTER is a partial constructor for the render pipeline's geometry (vertex stream, primitive, etc)
+;; - EFFECT also a constructor for the render pipeline, (depthstencil, multisample, blend, color targets)
+;;
+;; - not just render pipeline; scene bindings as well; generate small render object descriptor for DoD batches (see destiny's renderer)
+;;
+;; think about high level view of render frame graph:
+;; - viewports (1+ per swapchain)
+;; - views (1+ per viewport) :: camera, lights, objects
+;; - passes (1+ per view)    :: fragment outputs, classify constituents,
+;; - batches (1+ per pass)   :: draw calls (all effects and objects accessible; direct singleton, indirect batch, instanced group, gpu culling, ...)
+;; - effects (1+ per batch)  :: resource bindings
+;; - objects (1+ per effect) :: resource bindings & vertex inputs
+
+;; BATCHES
+;; - ideally not every effect and object carries their `GPUBindGroup` or `GPUBuffer`s
+;; - dont make "one at a time" shaders, rather "draw all meshes of type A using material A' stored indirectly in uniforms"
+;; - different buffers/textures = different draw, even indirect
+;;
+;; - can merge buffers, use texture arrays
+;; - need compatible shader entry then
+;; - gets indices to use, performs lookups and samples
+;; - then delegates to reusable function for other variants of the same
+
+;; what does this have to do with IO?
+;; - interpolants, mesh layouts, affects the vertex/fragment stages
+;; - many many different variants, packings, layouts of the same few concepts
+;; - where is the data fed into IO living in the ending
+;; - batching changes how the stages access data, but not by much
+;; -
+
+
+;; BINDS
+;; - UE5 declares vertex structures, always
+
+
+;; REBINDS -> override-io might be useful after all? or is that link unused
+;; - not all shaders will want say texcoord0 to location 4
+;; - but theres a single shader module for all, must overlap all overloads without conflict
+;; - _in.texcoord0 can cooexist with a definition of the same name at a different binding
+;; - bindings declared inside structs, scoped; just need to ensure no two binds have the same name (simple uniq check)
+
+;; POINT OF STREAM/TARGET
+;; - simpler binding into high level domain
+;; - pack/unpack of data into/from attributes, in between and out of stages
+;; - matching CPU side meta "structure" to prepare data, optional (offline data or GPU generated data dont need CPU code)
+;; - mostly relevant in higher level shaders -> effect and surface ones, those with pattern structure
+;;   - system :: define EVERYTHING, more verbose (at first until patterns emerge,) but full control -> every shader can be 100% different
+;;   - effect :: a filtering operation between two render stages; hardwired I/O but full implementation freedom (f -> effect -> t) (effect)
+;;   - matter :: combines a mesh stream and a surface effect; selectable input over hardwired output (v -> mesh -> effect -> io -> f -> effect -> t)
+
+;; EFFECT
+
+;; MATTER
+;; - Instancing
+;; - Instance culling
+;; - Vertex Fetch (direct, indirect)
+;; - Variable # of TexCoords
+;; - Tangent basis + determinant
+;; - Vertex color
+
+
+;; Meshes Layouts:
+;; - Static
+;; - Skinned
+;; - Particle
+;; - Water
+;; - Sky
+;; - Heightfield -> single
+;; - Landscape -> blended layers of virtual texture
+;; - Skeletal Anim
+;; - Ribbon
+;; - Trail
+
+;; Framebuffers:
+;;
+
+(defn- attribute-type [type]
+  (gpu/prim-type
+   (case type
+     (gpu/uint32)   gpu/u32
+     (gpu/uint8x2
+      gpu/uint16x2
+      gpu/uint32x2) gpu/uvec2
+     (gpu/uint32x3) gpu/uvec3
+     (gpu/uint8x4
+      gpu/uint16x4
+      gpu/uint32x4) gpu/uvec4
+     (gpu/sint32)   gpu/i32
+     (gpu/sint8x2
+      gpu/sint16x2
+      gpu/sint32x2) gpu/ivec2
+     (gpu/sint32x3) gpu/ivec3
+     (gpu/sint8x4
+      gpu/sint16x4
+      gpu/sint32x4) gpu/ivec4
+     (gpu/float32)  gpu/f32
+     (gpu/unorm8x2
+      gpu/unorm16x2
+      gpu/snorm8x2
+      gpu/snorm16x2
+      gpu/float32x2) gpu/vec2
+     (gpu/float32x3) gpu/vec3
+     (gpu/unorm8x4
+      gpu/unorm16x4
+      gpu/snorm8x4
+      gpu/snorm16x4
+      gpu/float32x4) gpu/vec4)))
+
+(defn- color-target-type [type]
+  (gpu/prim-type
+   (case type
+     (gpu/r8uint
+      gpu/r16uint
+      gpu/r32uint)  gpu/u32
+     (gpu/r8sint
+      gpu/r16sint
+      gpu/r32sint)  gpu/i32
+     (gpu/r8unorm
+      gpu/r16float
+      gpu/r32float) gpu/f32
+     (gpu/rg8uint
+      gpu/rg16uint
+      gpu/rg32uint)  gpu/uvec2
+     (gpu/rg8sint
+      gpu/rg16sint
+      gpu/rg32sint)  gpu/ivec2
+     (gpu/rg8unorm
+      gpu/rg16float
+      gpu/rg32float) gpu/vec2
+     (gpu/rgba8uint
+      gpu/rgba16uint
+      gpu/rgba32uint) gpu/uvec4
+     (gpu/rgba8sint
+      gpu/rgba16sint
+      gpu/rgba32sint) gpu/ivec4
+     (gpu/rgba8unorm
+      gpu/rgba8unorm-srgb
+      gpu/bgra8unorm
+      gpu/bgra8unorm-srgb
+      gpu/rgba16float
+      gpu/rgba32float
+      gpu/rgb10a2unorm
+      gpu/rg11b10ufloat) gpu/vec4)))
 
 (defwgsl builtin [stage dir type] emit-builtin)
+
+(defwgsl attribute    [bind type step]       (emit-io attribute-type))
+(defwgsl interpolant  [bind type]            (emit-io gpu/prim-type))
+(defwgsl color-target [bind type mask blend] (emit-io color-target-type))
+
+;; TODO override nodes? don't need WGSL on these
+;;(defwgsl vertex-attr* [node type step])
+;;(defwgsl draw-buffer* [node type mask blend])
 
 (defgpu primitive)
 (defgpu stencil-face)
@@ -197,19 +347,69 @@
 (defgpu blend-comp)
 (defgpu blend)
 
+;; OK SO BACK TO DECOUPLING EVERYTHING ->
+;; defattrib direct GPU prim type (expand matrix? -> later!)
+;; definput from existing attribs -> specify CPU side step mode & types, compute offsets + stride
+;; defvertex deps on attrib collection from GenIO, regardless of inputs
+;; - vertex reused in many pipelines, input layout changes less frequently
+
+;; FREQUENCY OF CHANGE
+;; - attribute def -> rarely if ever; dont push in packing here, but pass it through here instead; simple layers not complex system
+;; - input layout -> to match vertex buffers
+;; - stream -> array of inputs -> default on vertex, override on pipeline
+
+
+;; VERTEX FACTORY -> one thing to have vertex streams, most often needs unpacking
+;; - no more stream; vertex.in is seq of vertex arrays
+;; - define data meant for fragment
+;;   - or could read input from fragment, generate the interpolant and link to input in vertex
+;;   - even simpler;
+
+;; dont need to generate everything at once
+;; - emit meta, meta, meta
+;; - start from the end result
+
+;; RENDER PIPELINE
+;; - layout (RESOURCES)
+;; - vertex (INPUTS)
+;; - fragment (OUTPUT)
+;; - primitive (STATE)
+;; - depthstencil (STATE)
+;; - multisample (STATE)
+
+;; VERTEX
+;; - inputs (BUFFER LAYOUTS) -> .setVertexBuffer
+;; - outputs (INTERPOLANTS) -> include inputs pulled from FRAGMENT
+
+;; FRAGMENT
+;; - inputs (attributes, interpolants) -> generate interpolants from attributes, passthru in vertex
+;; - outputs (color targets)
+
+;; TODO vertex arrays as ctors of their associated buffers? again, need to plug into another system -> dont know who what when where data generated
+;; TODO color targets as ctors of their associated resources? -> input to such ctor, dont generate tons of functions when data suffices
+;; - color targets come from the render graph, which is built from interlinking render passes
+;; - vertex arrays come from vertex buffers, which come from meshes and render systems
+
+;; OKAY -> DONT SOLVE EVERYTHING HERE
+;; - layer up, then reduce as relations emerge
+;; - dont want magical I/O, just composable bits
+
+;; systems are made of elements, interconnections and functions;
+;; but can also be seen as queries, relations and goals
+
+;; DO, then simplify
 
 ;;; Stateful Shader Nodes
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- emit-kernel [node]
   (let [wgsl (str "@compute @workgroup_size(" node.x)]
-    (when-let [y node.y] (str! wgsl ", " y))
-    (when-let [z node.z] (str! wgsl ", " z))
+    (some->> node.y (str! wgsl ", "))
+    (some->> node.z (str! wgsl ", "))
     (str! wgsl ")\nfn " node.name \()
     (when node.in
       (str! wgsl "_in : " node.in.name))
-    (str! wgsl ") {\n" node.wgsl \})
-    wgsl))
+    (str! wgsl ") {\n" node.wgsl \})))
 
 (defn- emit-entry [stage in out node]
   (let [wgsl (str "@" stage "\nfn " node.name \()]
@@ -218,24 +418,27 @@
     (str! wgsl \))
     (if-not node.out
       (str! wgsl " {\n" node.wgsl \}) ; TODO can this even compile?
-      (str! wgsl " -> " node.out.name " {\n  var "
-            out " : " node.out.name ";\n"
-            node.wgsl "  return " out ";\n}"))
-    wgsl))
+      (str! wgsl " -> " node.out.name " {\n  var " out " : " node.out.name ";\n"
+            node.wgsl
+            "  return " out ";\n}"))))
 
 (def emit-vertex (partial emit-entry "vertex"   "_in" "_io"))
 (def emit-pixel  (partial emit-entry "fragment" "_io" "_out"))
 
 (defwgsl kernel [in x y z wgsl] emit-kernel)
-(defwgsl vertex [in out   wgsl] emit-vertex)
-(defwgsl pixel  [in out   wgsl] emit-pixel)
+(defwgsl vertex [in out   wgsl] emit-vertex) ; TODO in.deps -> lists vertex attribs -> generate vertex state here!
+(defwgsl pixel  [in out   wgsl] emit-pixel)  ; TODO same
 
 (defwgsl group  [bind])
 (defwgsl layout [groups])
 
+(defwgsl input  [])
+(defwgsl stream [])
+(defwgsl output [])
+
 (defwgsl compute [layout kernel])
-(defwgsl render  [layout vertex primitive depth-stencil multisample fragment])
-;; TODO are blend states dependent of fragment or render?
+(defwgsl render  [layout vertex primitive depth-stencil multisample fragment
+                  stream target])
 
 
 ;;; Shader System
@@ -272,6 +475,19 @@
                     :deps (js/Array.from deps)}]
         (.set defs id io)
         io)))
+
+;; defpixel
+;; - refers DRAW BUFFERS, not TARGET; but draw buffers CAN have a default target
+;; - node refers TARGET, specialized GENIO
+
+;; EITHER CALL THAT OR STREAM REFERENCE
+(defn gen-stream [id deps]
+  (let [^object io (gen-io id deps)]
+    ;; find matching `stream` node, or generate one
+    io))
+
+(defn gen-target [id deps]
+  )
 
 (defn- entry? [node]
   (case node.kind (Kernel Vertex Pixel) true false))
@@ -331,7 +547,7 @@
 (defn- bind-group-layout [node]
   (assert (= Group node.kind))
   (let [^js/Array ids node.deps
-        entries (aget util/arrays (.-length ids))]
+        entries (aget util/arrays-a (.-length ids))]
     (util/doarray [id n ids]
       (let [e (.get defs id)
             b e.bind
@@ -347,7 +563,7 @@
 (defn- pipeline-layout [node]
   (assert (= Layout node.kind))
   (let [^js/Array ids (or node.groups node.deps)
-        groups (aget util/arrays (.-length ids))]
+        groups (aget util/arrays-a (.-length ids))]
     (util/doarray [id n ids]
       (aset groups n
             (if (nil? id)
@@ -361,10 +577,13 @@
     (stage js/undefined "" (util/array))))
 
 (defn- auto-layout [node]
-  ;; TODO can do better than "auto"
-  ;; - tracking bindings dependencies and their dependent groups
-  ;; - slower, wont work if binding used in multiple groups, but
-  gpu/empty-pipeline-layout)
+  (if-let [layout-id node.layout]
+    (let [layout (.get defs layout-id)]
+      layout.gpu)
+    ;; TODO can do better than "auto"
+    ;; - tracking bindings dependencies and their dependent groups
+    ;; - slower, wont work if binding used in multiple groups, but
+    gpu/empty-pipeline-layout))
 
 (defn- compute-pipeline [node]
   (assert (= Compute node.kind))
@@ -372,19 +591,44 @@
   (gpu/compute-pipeline node.name (auto-layout node)))
 
 (defn- attr-buffers [node]
-  (util/array)) ; TODO
+  (let [io-node (.get defs node.id)
+        ^js/Array
+        deps io-node.deps ; TODO need count WITHOUT builtins (def* -> push builtins last, emit count without them)
+        out  (aget util/arrays-a (.-length deps))]
+    ;; TODO reassemble stream here?
+    (util/doarray [id n deps]
+      )
+    out))
 
 (defn- draw-targets [node]
-  (util/array)) ; TODO
+  (let [io-node (.get defs node.id)
+        ^js/Array
+        deps io-node.deps
+        out (aget util/arrays-b (.-length deps))]
+    (util/doarray [id n deps]
+      ;; TODO need to loop, not every location might be bound: need to splice in `undefined`
+      (let [d (.get defs id)]
+        (aset out n (gpu/color-target d.bind d.format d.blend d.write-mask))))
+    out))
+
+(defn- primitive-state [id]
+  )
+
+(defn- depth-stencil-state [id]
+  )
+
+(defn- multisample-state [id]
+  )
 
 (defn- render-pipeline [node]
   (assert (= Render node.kind))
   (shader gpu/vertex   node.vertex   attr-buffers)
   (shader gpu/fragment node.fragment draw-targets)
-  (gpu/render-pipeline node.name     (auto-layout node)
-                       node.primitive
-                       node.depth-stencil
-                       node.multisample))
+  (gpu/render-pipeline node.name
+                       (auto-layout         node)
+                       (primitive-state     node.primitive)
+                       (depth-stencil-state node.depth-stencil)
+                       (multisample-state   node.multisample)))
 
 (defn- reg-gpu [^object node ctor]
   (assert (nil? node.gpu))
@@ -393,6 +637,7 @@
                 (fn set [] (set! (.-gpu node) (ctor node)))))
 
 (defn- reg-mod [^object node]
+  (assert (nil? node.mod))
   (.add entry-ids node.uuid)
   (set! (.-mod node) time/frame-number))
 
@@ -460,9 +705,13 @@
   io)
 
 (defn pre-tick []
+  ;; TODO pipelines are the true entry points -> determine variants of entry points -> lazy init variants (or opt-in main module compile)
+
+  #_
   (when (pos? (.-size dirty-ids))
     (check-dirty dirty-ids)
     (.clear dirty-ids))
+  #_
   (when (pos? (.-size entry-ids))
     (let [g   (-> (to-module entry-ids)
                   (topo-sort util/temp-array))

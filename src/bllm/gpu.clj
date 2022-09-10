@@ -94,7 +94,7 @@
                (util/js-sym (name->tag-str "" sym))
                (mapv first fields)
                #(emit-setters % (next fields))
-               #(emit-object ((if index? next identity) param-specs)))))
+               #(emit-object param-specs))))
 
 (defm ^:private deflayout
   [sym & param-specs]

@@ -69,19 +69,20 @@
                 (cljs.core/array
                  ~@(for [n (gen-arrays)]
                      `(js/Array. ~n)))))
-           (defgetter [sym]
+           (defgetter [sym from]
              `(defn ~sym
                 "Returns a short-lived JavaScript array holding the given arguments."
                 ~@(let [ns (gen-arrays)
                         xs (map #(symbol (str "x" %)) ns)]
                     (for [n ns]
                       `([~@(take n xs)]
-                        (let [~'a (aget ~'arrays ~n)]
+                        (let [~'a (aget ~from ~n)]
                           ~@(for [i (range n)]
                               `(aset ~'a ~i ~(nth xs i)))
                           ~'a))))))]
-  (defstore arrays)
-  (defgetter array))
+  (defstore arrays-a)
+  (defstore arrays-b)
+  (defgetter array arrays-a))
 
 (def empty-array (array))
 (def empty-obj   #js {})
@@ -128,3 +129,17 @@
     (when (nil? x)
       (util/return i)))
   (.-length xs))
+
+
+;;; Convenience
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn response-test [^js/Response res]
+  (if (.-ok res)
+    res
+    (js/Promise.reject res)))
+
+(defn response-data [^js/Response res] (.arrayBuffer res))
+(defn response-blob [^js/Response res] (.blob res))
+(defn response-json [^js/Response res] (.json res))
+(defn response-text [^js/Response res] (.text res))

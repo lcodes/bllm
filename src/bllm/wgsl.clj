@@ -20,15 +20,7 @@
 ;;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- gpu-id
-  ([sym]
-   (gpu-id (str *ns*) (name sym)))
-  ([ns sym]
-   (assert (string? ns))
-   (assert (string? sym))
-   (let [h (bit-xor (hash ns) (hash sym))] ; Poor man's deterministic ID.
-     (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
-     h)))
+(def ^:private gpu-id util/unique-id)
 
 (def ^:private gpu-ns
   "Converts a `Namespace` into a WGSL-compatible identifier. Memoized."
@@ -95,14 +87,14 @@
 
 (def ^:private has-deps?
   "WGSL node kinds tracking their dependencies to other WGSL nodes."
-  '#{uniform
+  '#{buffer
      struct
      function
      depth-stencil
      blend
+     kernel
      vertex
      pixel
-     kernel
      group
      layout
      render
@@ -206,6 +198,37 @@
             `(set! (.-wgsl ~node) (str ~@(->> (map emit wgsl-emitters)
                                               (interpose "\n\n")))))
          ~node))))
+
+(defm ^:private defast
+  "Defines a WGSL AST element. Encodes an expression in Clojure and decodes
+  it in ClojureScript."
+  [sym]
+  ;; generate decoder -> really just an indexed function, pulls arguments from stream & creates node
+  ;;
+  ;; variants "spread" -> can be a few function calls under the entry before the changed function -> all chain affected
+  )
+
+(comment (defast if cond then else)
+         (defast do [body])
+         (defast let [bindings] [body])
+         (defast call fn [args]))
+;; encoding could be MUCH smaller than embedding tons of pre-emitted wgsl -> gzip make it kinda irrelevant, still interesting to measure
+;; - ArrayBuffer[0x12345609,0x12304355,0x12301230] -> arg arg OP arg OP OP arg OP arg OP -> AST tree in JS!
+;; - emit code really not hard to port to JS
+;; - even generating the JS encoding doesnt look that hard
+;; - decoding is trivial, its just a forth stack
+;; - worst case gives us specs for AST here
+
+;; BUT
+;; - can now generate WGSL entirely from JS
+;; - good to build tech and mesh types with
+;; - schedule pipeline with variant sets
+;;   - locate all entry permutations
+;;   - trace to leaves, collect intermediates to "rename"
+;;     - ie foo-cs calls both feature:on and feature:off, but through fizzbazz()
+;;     - need fizzbazz and fizzbazz__feature:on -> feature default changes nothing
+;;     - then all variants can coexist in single shader module
+;;     - need same rename for entry points
 
 
 ;;; Render States
@@ -332,10 +355,11 @@
 ;;; I/O - Builtin vars, vertex attributes, interpolants, fragment draw targets
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; TODO `defgroup` treatment: `defstream` for vertex buffers and `deftarget`?
-
-(defn- io-expr [prefix-fn name-prefix m]
-  (assoc m ::expr (str \_ (prefix-fn m) \. name-prefix (::name m))))
+(defn- io-expr
+  ([prefix]
+   (partial io-expr (constantly prefix) ""))
+  ([prefix-fn name-prefix m]
+   (assoc m ::expr (str \_ (prefix-fn m) \. name-prefix (::name m)))))
 
 (defn- builtin-io [dir in out]
   (case dir
@@ -368,19 +392,82 @@
 
 (defm defio
   "Render I/O nodes have a `bind` slot and a `type`."
-  [node prefix]
-  `(defnode ~node
-     {:expr (partial io-expr (constantly ~prefix) "")}
-     ~'[sym bind type]))
+  [node prefix])
 
-(defio defvertex-attr "Defines an input to the vertex stage."         "in")
-(defio defdraw-target "Defines an output from the fragment stage."    "out")
-(defio definterpolant "Defines an I/O channel between render stages." "io")
+(defnode definterpolant
+  {:expr (io-expr "io")}
+  [sym bind type])
 
-(defnode defindirect
-  "Redefines the CPU-side meta-data of a vertex-attr or draw-target."
-  {:kind :indirect-IO}
-  [sym ref & overrides]
+(defnode defattrib
+  {:expr (io-expr "in") :kind :attribute}
+  [sym bind type & step]
+  (if step
+    (util/keyword->gpu (first step))
+    'bllm.gpu/step-vertex))
+
+(defn- parse-mask* [kw]
+  (->> (name kw)
+       (seq)
+       (map {\R 1 \G 2 \B 4 \A 8})
+       (reduce bit-or 0)))
+
+(def ^:private parse-mask (memoize parse-mask*))
+
+(comment (parse-mask* :GA))
+
+(defnode deftarget
+  {:expr (io-expr "out") :kind :color-target :keys [:mask :blend]}
+  [sym bind type & mask|blend]
+  (let [elem (first mask|blend)
+        mask (if (keyword? elem)
+               (parse-mask* elem)
+               'bllm.gpu/RGBA)
+        elem (if mask (second mask|blend) elem)
+        blend (when (symbol? elem)
+                (let [node (ana/resolve-existing-var &env elem)]
+                  (when (not= :blend (::kind node))
+                    (throw (ex-info "Invalid blend state reference" {:blend elem})))
+                  node))]
+    {:mask mask :blend blend}))
+
+;; ATTRIB -> location + GPU type from preferred CPU format
+;; ARRAYS -> offsets, stride, ordered attrib as deps
+
+;; ISSUE -> how to keep attribs locations matching across different arrays?
+;; -> thread value throughout? how to pass mat4 -> expand to individual vertex descriptors
+;;    -> just need to see :matXXX as type?
+
+;; know the structure bottom-up
+;; need top-down wirings
+;; - wire pipeline to shader and state
+;;
+;; - pipeline -> vertex
+;;            -> stream -> arrays -> attribs & step mode
+;;                      -> buffers
+
+;; vertex :: shader stage -> consumes attributes, doesnt care about arrays and stream, but still indirectly bound to them at pipeline
+;; stream :: render state -> composes arrays, thats it -> single state given to pipeline
+;; arrays :: buffer shape -> computes attrib offsets, array stride, interleaved, optional CPU-side TypedArray ctor -> hmm need to recompile on attrib changes
+;; attrib :: source graph -> contains
+
+;; pipeline bound to the "shape" of `setVertexBuffer`
+;; - in SOME cases, these geometry can be generated on the CPU -> pack FN useful, make it OPT IN
+;; - matches offsets and stride computed at `defarray`
+;;   - use of multiple arrays is FREQUENCY OF CHANGE, not just step mode
+;;   - static mesh data + computed skinning inputs, for example
+;;
+;; vertex indexing completely decoupled UNLESS using strips, then part of primitive state
+;; - otherwise only specified by `setIndexBuffer` and triggered by `drawIndexed`
+(defm definput
+  [sym & attribs])
+
+(defm defoutput
+  [sym & targets]
+  )
+
+(defm defstream
+  [sym & inputs]
+  ;; build deps
   )
 
 
@@ -1101,7 +1188,7 @@
   (check-workgroup-size y :max-compute-workgroup-size-y)
   (check-workgroup-size z :max-compute-workgroup-size-z)
   (when (and (number? x) (number? y) (number? z))
-    (check-limit (* x y z) :max-compute-invocations-per-workgroup))
+    (gpu/check-limit (* x y z) :max-compute-invocations-per-workgroup))
   (compile-fn &env body
               (fn link [deps code wgsl]
                 (let [ids (select-node deps #(match-builtin % (::kind %)
@@ -1139,7 +1226,7 @@
   {:keys [:in :out :wgsl]}
   [sym & body]
   ;; TODO check :max-color-attachments
-  (compile-io :fragment :interpolant :draw-target &env body))
+  (compile-io :fragment :interpolant :draw-buffer &env body))
 
 
 ;;; Shader Pipelines - Runtime Execution State

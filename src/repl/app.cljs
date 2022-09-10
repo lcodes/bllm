@@ -2,11 +2,15 @@
   "Wires the high-level user application."
   (:require [bllm.core  :as core]
             [bllm.disp  :as disp]
+            [bllm.ecs   :as ecs]
             [bllm.html  :as html]
             [bllm.util  :as util :refer [def1]]
             [repl.asset :as asset]
             [repl.demo  :as demo]
-            [repl.error :as error]))
+            [repl.error :as error]
+            [bllm.load.cube]
+            [bllm.load.gltf]
+            [bllm.load.image]))
 
 (set! *warn-on-infer* true)
 
@@ -22,18 +26,21 @@
   "Interactive viewport; user input and gfx output."
   (js/document.createElement "canvas"))
 
+(def1 scene "The ECS world currently simulated." nil)
+
 (defn- tick
   "Consume inputs, simulate the next frame of reference, produce outputs."
   []
   (disp/request-frame tick) ; TODO frame skipping?
-  (try
-    (core/pre-tick)
-    (demo/pre-tick)
-    (core/tick)
-    (demo/post-tick)
-    (core/post-tick)
-    (catch :default e
-      (error/exceptional-pause e (util/callback tick)))))
+  (binding [ecs/*world* scene]
+    (try
+      (core/pre-tick)
+      (demo/pre-tick)
+      (core/tick)
+      (demo/post-tick)
+      (core/post-tick)
+      (catch :default e
+        (error/exceptional-pause e (util/callback tick))))))
 
 (defn- start
   "Launch the simulation. All systems are initialized at this point."
