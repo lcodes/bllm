@@ -20,31 +20,12 @@
 ;;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:private gpu-id util/unique-id)
-
-(def ^:private gpu-ns
-  "Converts a `Namespace` into a WGSL-compatible identifier. Memoized."
-  (memoize
-   #(-> (str %)
-        (util/kebab->camel)
-        (str/replace \. \_)
-        (str \_))))
-
-(defn- gpu-name
-  "Expands a `Symbol` into a WGSL-compatible fully-qualified identifier."
-  [sym]
-  (->> (name sym)
-       (util/kebab->camel)
-       (str (gpu-ns *ns*))))
-
 (defn- gpu-hash
   "Generates a unique hash for a WGSL shader node definition."
   [& args]
   (hash args)) ; Why is this so easy?
 
-(comment (gpu-ns "hello-world.foo-bar.deep-nest")
-         (gpu-name 'in-position)
-         (gpu-hash 1 "hi" :key 'sym))
+(comment (gpu-hash 1 "hi" :key 'sym))
 
 (defn- emit-field
   [{:keys [name type offset]}]
@@ -66,9 +47,9 @@
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
   [& {:keys [sym expr wgsl hash kind deps args]}]
-  (let [uuid (gpu-id sym)
+  (let [uuid (util/unique-id sym)
         hash (or  hash (gpu-hash args))
-        name (and wgsl (gpu-name sym))
+        name (and wgsl (util/unique-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
                wgsl (vary-meta assoc ::name name)
                expr (vary-meta expr))]
@@ -527,7 +508,7 @@
       ;; 1 - Run through vars, separate inline defs from refs, compute bind mask.
       (let [arg (first vars)
             def (when (seq? arg) arg)
-            dep (if-not def arg {::uuid (gpu-id (second def)) ::inline true})]
+            dep (if-not def arg {::uuid (util/unique-id (second def)) ::inline true})]
         (recur (next vars)
                (conj deps dep)
                (if def (conj defs def) defs)

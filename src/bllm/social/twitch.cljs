@@ -1,4 +1,4 @@
-(ns bllm.twitch
+(ns bllm.social.twitch
   "Twitch integration supporting both IRC chat and web API."
   (:require [bllm.data :as data]
             [bllm.ecs  :as ecs]

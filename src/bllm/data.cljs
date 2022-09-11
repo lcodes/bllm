@@ -16,60 +16,139 @@
 ;;; IndexedDB
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def1 ^:private project
+  "Name of the IndexedDB database."
+  "bllm") ; TODO project management (one db per project, multi-db projects -> all one context)
+
 (def1 ^:private version
   "Bumped when a release includes schema changes.
 
   Incremented at runtime on schema changes at the REPL."
-  0)
+  1)
 
 (def1 ^:private ^js/IDBDatabase conn nil)
 
-(comment (js/console.log conn))
+(def1 ^:private stores (js/Map.))
 
-(defn- on-abort [e]
-  (js/console.error e))
+(def1 ^:private dirty-stores (js/Set.))
 
-(defn- on-close [e]
-  (js/console.log "close" e)
-  )
+(comment (js/console.log conn)
+         (js/console.log stores))
 
-(defn- on-error [e]
-  (js/console.error e))
+(defn- on-close []
+  (set! conn nil))
 
-(defn- on-version-change [e]
-  (js/console.log e))
+(defn- on-abort [^js/Event e]
+  (js/console.error "abort" e.target)) ; transaction aborted -> global handler?
+
+(defn- on-error [^js/Event e]
+  (js/console.error "error" e.target)) ; transaction error
+
+(defn- on-version-change [^js/IDBVersionChangeEvent e]
+  (js/console.log "version" e)) ; another connection upgraded the database
+
+(defn- upgrade [^js/IDBDatabase db desc]
+  (let [store (.createObjectStore db desc.name (aget desc.keys 0))]
+    (util/dorange [n 1 desc.keys.length]
+      (let [k (aget desc.keys n)]
+        (.createIndex store k.name k.path k)))))
+
+(defn- on-upgrade-needed [^js/object #_js/IDBVersionChangeEvent e]
+  (let [db (.. e -target -result)]
+    (if (zero? (.-size dirty-stores))
+      (util/domap [store _ stores]
+        (upgrade db store))
+      (util/docoll [name dirty-stores]
+        (upgrade db (.get stores name))))))
+
+(defn- on-blocked [^js/IDBVersionChangeEvent e]
+  (js/console.log "blocked" e))
+
+;; TODO check if valid drag source
+(defn- on-drag-enter [e]
+  ;; TODO add drag class
+  (util/prevent-default e))
+
+(defn- on-drag-end [e]
+  ;; TODO remove drag class
+  (util/prevent-default e))
+
+(defn- on-drag-over [e]
+  (util/prevent-default e))
+
+(declare create)
+(defn- on-drop [e]
+  (try
+    (util/do-node-list [f e.dataTransfer.files]
+      (create f.name f))
+    (catch :default e
+      (js/console.log "drop error" e)))
+  (util/prevent-default e)) ; TODO error UI -> catch & eat -> wrapper macro
+
+(defn- init-version [dbs]
+  (util/doarray [db dbs]
+    (when (= project db.name)
+      (set! version db.version)
+      (util/return))))
+
+(defn- open []
+  (assert (nil? conn))
+  (util/defer [resolve reject]
+    (let [^object req (.open js/indexedDB project version)]
+      (set! (.-onupgradeneeded req) on-upgrade-needed)
+      (set! (.-onblocked req) on-blocked)
+      (set! (.-onerror   req) reject)
+      (set! (.-onsuccess req)
+            (fn success []
+              (set! conn req.result)
+              (set! (.-onabort conn) (util/callback on-abort))
+              (set! (.-onclose conn) (util/callback on-close))
+              (set! (.-onerror conn) (util/callback on-error))
+              (set! (.-onversionchange conn) (util/callback on-version-change))
+              (resolve))))))
 
 (defn init []
-  (some-> conn .close) ; TODO reinit pipeline to live code schema upgrade
-  (js/Promise.
-   (fn defer [resolve reject]
-     (let [^object req (.open js/indexedDB "data" version)]
-       (set! (.-onupgradeneeded req)
-             #(let [^js/IDBDatabase db req.result]
-                ;; TODO this will grow, wont be fun to manage
-                (doto (.createObjectStore db "thumbnail"))
-                (doto (.createObjectStore db "import" #js {:keyPath "source"}))
-                (doto (.createObjectStore db "blob"))
-                (doto (.createObjectStore db "file" #js {:keyPath "uuid"})
-                  (.createIndex "name"   "name")
-                  (.createIndex "kind"   "kind")
-                  (.createIndex "size"   "size")
-                  (.createIndex "deps"   "deps" #js {:multiEntry true})
-                  (.createIndex "parent" "parent")
-                  (.createIndex "import" "import" #js {:multiEntry true}))))
-       (set! (.-onerror   req) reject)
-       (set! (.-onsuccess req)
-             (fn success []
-               (set! conn req.result)
-               (set! (.-onabort conn) (util/callback on-abort))
-               (set! (.-onclose conn) (util/callback on-close))
-               (set! (.-onerror conn) (util/callback on-error))
-               (set! (.-onversionchange conn) (util/callback on-version-change))
-               (resolve)))))))
+  (doto ^js/Node (.-body js/document)
+    (.addEventListener "dragenter" (util/callback on-drag-enter))
+    (.addEventListener "dragend"   (util/callback on-drag-end))
+    (.addEventListener "dragover"  (util/callback on-drag-over))
+    (.addEventListener "drop"      (util/callback on-drop)))
+  (-> (.databases js/indexedDB)
+      (.then init-version)
+      (.then open)))
+
+(defn destroy-db []
+  (set! version 1)
+  (.deleteDatabase js/indexedDB project)) ; NOTE Evaluate this at your own risk!
+
+(defn primary-key [path auto]
+  #js {:keyPath path :autoIncrement auto})
+
+(defn index-key [name path unique multi]
+  #js {:name name :path path :unique unique :multiEntry multi})
+
+(defn register [name hash keys]
+  (let [store #js {:name name :hash hash :keys keys}
+        dirty (if-let [existing (.get stores name)]
+                (not= hash existing.hash) ; TODO check for indices to delete
+                (boolean conn))]
+    (.set stores name store)
+    (when dirty
+      (.add dirty-stores name))
+    store))
+
+(defn- finish-refresh []
+  (.clear dirty-stores)
+  ;; TODO kick off pending requests in the fresh queue -> resume normal queuing
+  )
 
 (defn pre-tick []
-  ;; schema dirty check -> `defstore` to specify indices and props
-  )
+  (when (and conn (pos? (.-size dirty-stores)))
+    ;; TODO move new requests to fresh queue, wait for existing requests to complete
+    (some-> conn .close)
+    (set! conn nil)
+    (util/inc! version)
+    (-> (open) (.then finish-refresh))))
 
 ;; dont care about scenes or specific file formats here
 ;; - just storing file entries, and data blobs
@@ -84,20 +163,52 @@
 ;; - stream from index -> filter -> results
 ;; - direct entry from key -> result (1)
 
+;; TODO later add all fields to defstore (split index hash; dont bump version if unindexed fields change?)
+;; - specs -> runtime validators, meta-data for UI, etc
+
 
 ;;; File System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Blob is unit of loading
-;;
+;; create -> add
+;; read -> get, getKey, getAll, getAllKeys, openCursor, openKeyCursor, count
+;; update -> put
+;; delete -> delete, clear
 
-(data/defstore File
-  "An indexed descriptor for a `Blob` of content."
-  :key :auto-increment ;; TODO auto increment with keypath?
-  name
-  kind
-  size
-  )
+;; CRUD -> like server side REST, also async, also maps to FS ops (well, this is a FS)
+;; - as part of existing transaction -> dont pollute this part with transaction mgmt
+;; - one transaction per tick, accum during frame, flush at end, results later
+
+(data/defstore File ; It's a UNIX system! I know this!
+  "An entry in the local filesystem.
+
+  See `Asset` for the file's relations, `Source` if the file has been imported,
+  `Preview` to get a thumbnail, and the matching object store for its contents.
+
+  NOTE Use `defstore` to create new kinds of assets."
+  [id :auto] ; Auto-generated primary asset key.
+  [kind]     ; Value generated from `defstore`.
+  [entry]    ; Primary key in the asset's store.
+  [parent])  ; `id` of the owner `Asset`. Always rooted at a project or library.
+
+(data/defstore Asset
+  "An asset is really the list of requirements to open this file."
+  [id   :unique]
+  [deps :multi])
+
+(data/defstore Source
+  "Stores information about an imported file. Actions are dispatched by kind."
+  [id  :unique]
+  [url :unique]
+  [generator]
+  [copyright]
+  [license])
+
+(data/defstore Preview
+  "Small media file to preview the asset without creating it inside the world.")
+
+(data/defstore Blob
+  "Stores binary data. Does nothing by itself, referenced by other assets.")
 
 ;; case:
 ;; - got 200+ meshes indexing one buffer (med size model)
@@ -113,12 +224,6 @@
 ;;   - not entirely true, textures can be in array blobs -> load multiple slices of multiple textures in 1 async op
 ;;   - again, one gpu upload -> compute shader to place things in proper place? in "theory" is faster
 
-(data/defstore Blob
-  "Unit of content loading."
-  :key File)
-
-(data/defstore Preview
-  :key File)
 
 ;; TODO handlers to generate previews (texture thumbnail, material sphere, mesh scene, audio waveform)
 
@@ -172,27 +277,56 @@
     (add-imp media-types types imp)
     imp))
 
-(defn import
-  "Imports a new asset."
-  ([^string url]
-   (if-let [m (.match url #"/([^/]+)\.([^.]+)(?:\?|#|$)")]
-     (import url (aget m 1) (aget m 2))
+(defn- create-with
+  [f ^string url arg]
+  (if-let [m (.match url #"(?:^|/)([^/]+)\.([^.]+)(?:\?|#|$)")]
+     (f url (aget m 1) (aget m 2) arg)
      (js/Promise.reject url)))
-  ([url name ext]
-   ;; TODO not found
-   (let [imp (.get extensions ext)
-         load imp.loader]
-     (if (= imp.fetch fetch-custom)
-       (load url)
-       (-> (js/fetch url)
-           (.then util/response-test)
-           (.then (case imp.fetch
-                    fetch-res  identity
-                    fetch-data util/response-data
-                    fetch-blob util/response-blob
-                    fetch-json util/response-json
-                    fetch-text util/response-text)) ^js/Promise
-           (.then #(load url % name ext)))))))
+
+(defn- create-json [blob]
+  (-> (util/response-text blob) ^js/Promise (.then js/JSON.parse)))
+
+(defn- create*
+  [url name ext blob]
+  (let [imp (.get extensions ext)
+        load imp.loader]
+    (case imp.fetch
+      (fetch-custom
+       fetch-res) (js/Promise.reject url) ; TODO can we map Blob to these? what gets affected?
+      (fetch-blob) (load url blob name ext)
+      (-> ^js/Promise
+          ((case imp.fetch
+             fetch-data util/response-data
+             fetch-text util/response-text
+             fetch-json create-json) blob)
+          (.then #(load url % name ext))))))
+
+(defn create
+  "Creates a new asset from a `js/Blob`."
+  [url blob]
+  (create-with create* url blob))
+
+(defn- import*
+  [url name ext]
+  ;; TODO not found
+  (let [imp (.get extensions ext)
+        load imp.loader]
+    (if (= imp.fetch fetch-custom)
+      (load url)
+      (-> (js/fetch url)
+          (.then util/response-test)
+          (.then (case imp.fetch
+                   fetch-res  identity
+                   fetch-data util/response-data
+                   fetch-blob util/response-blob
+                   fetch-json util/response-json
+                   fetch-text util/response-text)) ^js/Promise
+          (.then #(load url % name ext))))))
+
+(defn import
+  "Imports a new asset from a `js/URL` or a string."
+  [url]
+  (create-with import* url nil))
 
 
 ;;; Load Queue

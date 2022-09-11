@@ -81,32 +81,30 @@
 
     ;; passes -> infer from mix & match found defs?
     ;; - doesnt matter until passes are making pipeline requests
-    )
+    ))
 
-  (data/defstore Shader
-    ;; NOTE dont store builtin shaders; they still cound as first-class assets
+(data/defstore Shader
+  ;; NOTE dont store builtin shaders; they still cound as first-class assets
 
-    ;; entry points IL (packed reverse polish encoding)
-    ;; binding definitions
-    ;; pass definitions
-    ;; - feature requirements
-    ;; - variant definitions
-    ;; - fallback (if from another shader; matching pass on definition name + requirements)
+  ;; entry points IL (packed reverse polish encoding)
+  ;; binding definitions
+  ;; pass definitions
+  ;; - feature requirements
+  ;; - variant definitions
+  ;; - fallback (if from another shader; matching pass on definition name + requirements)
 
-    ;; upsert wgsl graph nodes (only bindings)
-    ;; generate (& reuse) pipeline layout (only need bindings)
-    ;; entry point ASTs, to generate the variants from -> no #ifdef
-    ;;  - doesnt matter if coming from asset, visual graph, parsed GLSL -> so long as it resolves & infers & compiles
-    ;;  - ie all texture maps optional; thats a ton of variants already
-    ;;    - then quality settings
-    ;;    - and different passes
-    ;;    - and various vertex formats (delegate to `mesh`)
-    )
+  ;; upsert wgsl graph nodes (only bindings)
+  ;; generate (& reuse) pipeline layout (only need bindings)
+  ;; entry point ASTs, to generate the variants from -> no #ifdef
+  ;;  - doesnt matter if coming from asset, visual graph, parsed GLSL -> so long as it resolves & infers & compiles
+  ;;  - ie all texture maps optional; thats a ton of variants already
+  ;;    - then quality settings
+  ;;    - and different passes
+  ;;    - and various vertex formats (delegate to `mesh`)
+  )
 
-  (data/defstore Material
-    ;; shader asset
-    ;; texture assets
-    ;; uniform buffer
-    )
-
+(data/defstore Material
+  ;; shader asset
+  ;; texture assets
+  ;; uniform buffer
   )

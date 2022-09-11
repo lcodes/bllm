@@ -13,7 +13,8 @@
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
   (:refer-clojure :exclude [float keep max min repeat replace])
   (:require-macros [bllm.gpu :refer [defbind deflayout defgpu defstage defres]])
-  (:require [bllm.meta :refer [defenum defflag]]
+  (:require [bllm.data :as data]
+            [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
 
 (set! *warn-on-infer* true)
@@ -874,4 +875,14 @@ fn frag() -> @location(0) vec4<f32> {
   (defres white-tex
     (texture-2d label rgba8unorm 1 1 (util/color 0xff 0xff 0xff 0xff)))
 
+  )
+
+
+;;; Data Resources
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(data/defstore Buffer
+  )
+
+(data/defstore Texture
   )

@@ -1,5 +1,6 @@
 (ns bllm.ecs
-  (:require [bllm.util :as util :refer [def1]]))
+  (:require [bllm.data :as data]
+            [bllm.util :as util :refer [def1]]))
 
 (set! *warn-on-infer* true)
 
@@ -16,9 +17,10 @@
   []
   )
 
-
 ;;; Simulation Worlds
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
 
 ;; TODO lightweight rust-like lifetime semantics -> only tracking high level systems flow
 ;; - far simpler than entity flow -> just tracking links between a graph of batches now
@@ -53,4 +55,13 @@
 (defn pre-tick []
   ;; Respond to events accumulated between frames
   ;; - including component type changes
+  )
+
+;;; Serialization
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(data/defstore Scene
+  )
+
+(data/defstore Prefab
   )

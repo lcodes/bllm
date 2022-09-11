@@ -149,6 +149,21 @@
 
 (comment (spaces 2))
 
+(def ^:private ns-prefix
+  "Converts a `Namespace` into camelCase identifier. Memoized."
+  (memoize
+   #(-> (str %)
+        (kebab->camel)
+        (str/replace \. \_)
+        (str "__"))))
+
+(defn unique-name
+  "Expands a `Symbol` into a camelCase fully__qualified identifier."
+  [sym]
+  (->> (name sym)
+       (kebab->camel)
+       (str (ns-prefix *ns*))))
+
 (defn unique-id
   ([sym]
    (unique-id (str *ns*) (name sym)))
@@ -281,6 +296,10 @@
               js/undefined
               (js/Array.prototype.slice.call (cljs.core/js-arguments)))))
 
+(defmacro defer
+  [& fn-args]
+  `(js/Promise. (fn ~'defer ~@fn-args)))
+
 
 ;;; Iterators -> What Doug Hoyte calls "duality of syntax" in Let Over Lambda.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -336,13 +355,19 @@
            (let [~var-name (.-value result#)]
              ~@body))))))
 
-;; TODO dorange
+(defmacro dorange
+  [[i from to] & body]
+  `(let [to# ~to]
+     (loop [~i ~from]
+       (when (< ~i to#)
+         ~@body
+         (recur (inc ~i))))))
 
 (defmacro do-node-list
-  "No overhead `doseq` specialized to a DOM `NodeList` interface."
+  "No overhead `doseq` specialized to a DOM `List` interface."
   {:style/indent 1}
   [[var-name list-expr] & body]
-  `(let [list# ~list-expr]
+  `(let [^js/List list# ~list-expr]
      (dotimes [n# (.-length list#)]
        (let [~var-name (.item list# n#)]
          ~@body))

@@ -143,3 +143,7 @@
 (defn response-blob [^js/Response res] (.blob res))
 (defn response-json [^js/Response res] (.json res))
 (defn response-text [^js/Response res] (.text res))
+
+(defn prevent-default [^js/Event e]
+  (.preventDefault e)
+  (.stopPropagation e))

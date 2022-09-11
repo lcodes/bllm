@@ -50,7 +50,27 @@
        [url data]
        :test))))
 
+(defn- primary-key [[s prop]]
+  `(bllm.data/primary-key
+    ~(name s)
+    ~(= prop :auto)))
+
+(defn- index-key [[s prop]]
+  `(bllm.data/index-key
+    ~(util/unique-name s)
+    ~(name s)
+    ~(= prop :unique)
+    ~(= prop :multi)))
+
 (defm defstore
   "Declare a new schema for an object store."
-  [sym & args]
-  )
+  [sym & keys]
+  `(def ~sym
+     (bllm.data/register
+      ~(util/unique-name sym)
+      ~(hash keys)
+      ~(if-not keys
+         'bllm.util/empty-array
+         `(cljs.core/array
+           ~(primary-key (first keys))
+           ~@(map index-key (next keys)))))))

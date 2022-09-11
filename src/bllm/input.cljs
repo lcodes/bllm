@@ -21,3 +21,9 @@
 
 (defn detach [target]
   )
+
+;; TODO mouse/touch
+;; TODO keyboard
+;; TODO gamepad
+;; TODO clipboard
+;; TODO orientation

@@ -5,6 +5,8 @@
 
 ;; https://webaudio.github.io/web-audio-api/
 
+;; TODO investigate https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API
+
 (set! *warn-on-infer* true)
 
 
@@ -27,14 +29,19 @@
 (defn post-tick []
   )
 
-;; navigator.mediaCapabilities
+;; https://developer.mozilla.org/en-US/docs/Web/API/Media_Capabilities_API
+;; https://developer.mozilla.org/en-US/docs/Web/API/Media_Session_API
+
 ;; decodeAudioData
 
-;; resources:
-;; - mixer graph
-;; - music track
-;; - sound atlas
-;; - sound buffer
+(comment
+  (data/defstore MixerGraph)
+
+  (data/defstore MusicTrack)
+
+  (data/defstore SoundAtlas)
+
+  (data/defstore SoundBuffer))
 
 ;; component state:
 ;; - mixer effect

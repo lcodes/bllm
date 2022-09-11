@@ -3,6 +3,9 @@
             [bllm.ecs  :as ecs]
             [bllm.util :as util :refer [def1]]))
 
+;; https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API
+;; https://developer.mozilla.org/en-US/docs/Web/API/Media_Capture_and_Streams_API
+
 ;; TODO development connection servers
 
 (set! *warn-on-infer* true)
