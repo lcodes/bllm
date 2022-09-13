@@ -363,7 +363,7 @@
          ~@body
          (recur (inc ~i))))))
 
-(defmacro do-node-list
+(defmacro dolist
   "No overhead `doseq` specialized to a DOM `List` interface."
   {:style/indent 1}
   [[var-name list-expr] & body]

@@ -18,12 +18,13 @@
                  [org.clojure/tools.macro   "0.1.5"]
                  [com.bhauman/figwheel-main "0.2.18"]]
 
-  :managed-dependencies [[ring/ring       ~ring-version]
-                         [ring/ring-core  ~ring-version]
-                         [ring/ring-devel ~ring-version]
-                         [org.eclipse.jetty/jetty-server                ~jetty-version]
+  :managed-dependencies [[org.eclipse.jetty/jetty-server                ~jetty-version]
                          [org.eclipse.jetty.websocket/websocket-server  ~jetty-version]
                          [org.eclipse.jetty.websocket/websocket-servlet ~jetty-version]
+                         [binaryage/devtools "1.0.6"]
+                         [ring/ring       ~ring-version]
+                         [ring/ring-core  ~ring-version]
+                         [ring/ring-devel ~ring-version]
                          [commons-codec "1.15"]
                          [ns-tracker    "0.4.0"]]
 
@@ -32,9 +33,8 @@
   :aliases {"build" ["run" "-m" "figwheel.main" "-O" "advanced" "-bo" "prod"]}
 
   :profiles
-  {:dev [:base {:dependencies [];[re-frame "1.3.0-rc3"]
-                               ;[day8.re-frame/re-frame-10x "1.5.0"]]
-
+  {:dev [:base {:dependencies [[re-frame "1.3.0"]
+                               [day8.re-frame/re-frame-10x "1.5.0"]]
                 :resource-paths ["target"]
                 :global-vars {*warn-on-reflection* true}}]
    :rel [:base {}]})

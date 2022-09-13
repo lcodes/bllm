@@ -1,9 +1,11 @@
 (ns bllm.ecs
-  (:require [bllm.util :refer [defm]]))
+  (:require [bllm.meta :as meta]
+            [bllm.util :as util :refer [defm]]))
 
 (defm defc
-  [sym & args]
-  `(def ~sym "TODO"))
+  [sym & fields]
+  (let [ast (meta/parse-struct &env fields)]
+    `(def ~sym "TODO")))
 
 (defm defsys
   [sym & args]

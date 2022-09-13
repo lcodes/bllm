@@ -56,15 +56,17 @@
   "A chat room associated with a live stream account."
   )
 
+#_
 (ecs/defc Badge "Badges displayed by this Entity."
   {:array 4}
-  [sprite :u16])
+  sprite :u16)
 
-(ecs/defc Joined "An active `Channel` receiving and sending `Message` events.")
+(comment
+  (ecs/defc Joined "An active `Channel` receiving and sending `Message` events.")
 
-(ecs/defc Message "A message sent by an `User` to a `Channel` or another user.")
+  (ecs/defc Message "A message sent by an `User` to a `Channel` or another user.")
 
-;; TODO event components -> one-frame use objects without allocations
-(ecs/defc Join "Request to join a chat `Channel`.")
-(ecs/defc Part "Request to part a chat `Channel`.")
-(ecs/defc Send "Request to send a chat `Message`.")
+  ;; TODO event components -> one-frame use objects without allocations
+  (ecs/defc Join "Request to join a chat `Channel`.")
+  (ecs/defc Part "Request to part a chat `Channel`.")
+  (ecs/defc Send "Request to send a chat `Message`."))

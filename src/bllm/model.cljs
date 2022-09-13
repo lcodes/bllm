@@ -1,11 +1,12 @@
 (ns bllm.model
-  ""
-  (:require [bllm.cull :as cull]
-            [bllm.data :as data]
-            [bllm.ecs  :as ecs]
-            [bllm.gpu  :as gpu]
-            [bllm.skin :as skin]
-            [bllm.wgsl :as wgsl]))
+  "Models are 3D objects composed of vertex geometry and shader materials."
+  (:require [bllm.cull  :as cull]
+            [bllm.data  :as data]
+            [bllm.ecs   :as ecs]
+            [bllm.gpu   :as gpu]
+            [bllm.scene :as scene]
+            [bllm.skin  :as skin]
+            [bllm.wgsl  :as wgsl]))
 
 ;; TODO pool GPU buffers to store meshes in (ie alloc 4mb pages & upload mesh buffers there)
 
@@ -27,11 +28,11 @@
 ;;   - effect ID (index of material inside batch)
 
 (ecs/defc StaticMesh
-  :require [cull/Bounds scene/LocalToWorld]
+  {:require [cull/Bounds scene/LocalToWorld]}
   ;; TODO rough design, better packing
-  [batch :u32]  ; Index to GPU resources (vertex, index, uniform) shared by multiple meshes
-  [index :u32]) ; Index of this mesh (draw params, pass node)
+  batch :u32  ; Index to GPU resources (vertex, index, uniform) shared by multiple meshes
+  index :u32) ; Index of this mesh (draw params, pass node)
 
 (ecs/defc SkinnedMesh
-  :require [cull/Bounds scene/LocalToWorld skin/Pose]
-  [batch :u32])
+  {:require [cull/Bounds scene/LocalToWorld skin/Pose]}
+  batch :u32)

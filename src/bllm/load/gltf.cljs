@@ -1,8 +1,11 @@
 (ns bllm.load.gltf
-  (:refer-clojure :exclude [float])
-  (:require [bllm.data :as data]
-            [bllm.meta :as meta]
-            [bllm.util :as util]))
+  (:refer-clojure :exclude [byte double float int short])
+  (:require [bllm.data  :as data]
+            [bllm.ecs   :as ecs]
+            [bllm.meta  :as meta]
+            [bllm.scene :as scene]
+            [bllm.util  :as util]
+            [bllm.view  :as view]))
 
 ;; https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html
 ;; https://github.com/KhronosGroup/glTF/tree/main/specification/1.0
@@ -11,10 +14,23 @@
 
 
 (meta/defenum gl
-  unsigned-short       0x1403
-  float                0x1406
-  array-buffer         0x8892
-  element-array-buffer 0x8893)
+  byte                   0x1400
+  unsigned-byte          0x1401
+  short                  0x1402
+  unsigned-short         0x1403
+  int                    0x1404
+  unsigned-int           0x1405
+  float                  0x1406
+  double                 0x140A
+  half-float             0x140B
+  nearest                0x2600
+  linear                 0x2601
+  nearest-mipmap-nearest 0x2700
+  linear-mipmap-nearest  0x2701
+  nearest-mipmap-linear  0x2702
+  linear-mipmap-linear   0x2703
+  array-buffer           0x8892
+  element-array-buffer   0x8893)
 
 (defn- finalize [contents]
   (js/console.log contents))
@@ -43,7 +59,7 @@
   [url json]
   (let [info json.asset]
     (if (not= "2.0" info.version)
-      (js/Promise.reject "Unsupported glTF (version 1.0)")
+      (js/Promise.reject "Unsupported glTF (version 1.0)") ;; TODO (non-PBR, still useful for meshes, scenes, basic materials)
       (let [bufs json.buffers
             imgs json.images
             num  (count bufs)

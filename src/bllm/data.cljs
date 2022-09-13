@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [import load])
   (:require-macros [bllm.data :as data])
   (:require [bllm.util :as util :refer [def1]]
-            [bllm.meta :as meta]))
+            [bllm.meta :as meta]
+            [clojure.string :as str]))
 
 (set! *warn-on-infer* true)
 
@@ -11,6 +12,106 @@
 ;; - anything loaded into shared array buffers is also fair game
 ;;   - ideally build systems upon these, modular closure output to lazy load same code in workers
 ;;   - getting a figwheel client into workers will be fun, all in one emacs cider REPL session
+
+
+;;; Importing Data
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def1 ^:private importers   (js/Map.)) ; imp-id -> importer | set<importer>
+(def1 ^:private extensions  (js/Map.)) ; string -> imp-id
+(def1 ^:private media-types (js/Map.)) ; string -> imp-id
+
+;; TODO importer versioning -> got db of data, URLs to originals; detect what to reimport on changes
+;; - reimport opened assets instantly, otherwise on load or batch on user demand -> expensive operation!
+
+(meta/defenum fetch-type
+  fetch-res
+  fetch-blob
+  fetch-data
+  fetch-json
+  fetch-text
+  fetch-custom)
+
+(defn- add-imp [^js/Map m k v]
+  (if-not (array? k)
+    (.set m k v)
+    (util/doarray [x k]
+      (.set m x v))))
+
+(defn- del-imp [^js/Map m k]
+  (if-not (array? k)
+    (.delete m k)
+    (util/doarray [x k]
+      (.delete m x))))
+
+(defn importer
+  "Registers a new asset importer."
+  [uuid name exts types fetch loader]
+  ;; Old importer.
+  (when-let [^object existing (.get importers uuid)]
+    (del-imp extensions  existing.exts)
+    (del-imp media-types existing.types))
+  ;; New importer.
+  (let [imp #js {:uuid   uuid
+                 :name   name
+                 :exts   exts
+                 :types  types
+                 :fetch  fetch
+                 :loader loader}]
+    (.set importers uuid imp)
+    (add-imp extensions  exts  imp)
+    (add-imp media-types types imp)
+    imp))
+
+(defn- parse-src [^js/object src]
+  (if-let [m (.match src.url #"(?:^|/)([^/]+)\.([^.]+)(?:\?|#|$)")]
+    (do (set! (.-name src) (aget m 1))
+        (set! (.-ext  src) (str/lower-case (aget m 2)))
+        src)
+    (throw src))) ; TODO reason why
+
+(defn- create-json [blob]
+  (-> (util/response-text blob) ^js/Promise (.then js/JSON.parse)))
+
+(defn create
+  "Creates a new asset from a `js/Blob`."
+  [url-or-src blob]
+  (let [src (parse-src (if (string? url-or-src)
+                         #js {:url url-or-src}
+                         url-or-src))
+        imp (.get extensions src.ext)
+        load imp.loader]
+    (case imp.fetch
+      (fetch-blob) (load src blob)
+      (fetch-custom fetch-res)
+      (let [url (js/URL.createObjectURL blob)]
+        (set! (.-url src) url)
+        (util/finally (load src) #(js/URL.revokeObjectURL url)))
+      ;; else
+      (-> ^js/Promise
+          ((case imp.fetch
+             fetch-data util/response-data
+             fetch-text util/response-text
+             fetch-json create-json) blob)
+          (.then #(load src %))))))
+
+(defn import
+  "Imports a new asset from a `js/URL` or a string."
+  [url]
+  (let [src (parse-src #js {:url url})
+        imp (.get extensions src.ext)
+        load imp.loader]
+    (if (= imp.fetch fetch-custom)
+      (load url)
+      (-> (js/fetch url)
+          (.then util/response-test)
+          (.then (case imp.fetch
+                   fetch-res  identity
+                   fetch-data util/response-data
+                   fetch-blob util/response-blob
+                   fetch-json util/response-json
+                   fetch-text util/response-text)) ^js/Promise
+          (.then #(load src %))))))
 
 
 ;;; IndexedDB
@@ -24,7 +125,7 @@
   "Bumped when a release includes schema changes.
 
   Incremented at runtime on schema changes at the REPL."
-  1)
+  1) ; TODO this means release version will often be lower than local version. git might have answers
 
 (def1 ^:private ^js/IDBDatabase conn nil)
 
@@ -47,6 +148,7 @@
 (defn- on-version-change [^js/IDBVersionChangeEvent e]
   (js/console.log "version" e)) ; another connection upgraded the database
 
+;; TODO doesnt work if the object store already exists; need to access from a transaction
 (defn- upgrade [^js/IDBDatabase db desc]
   (let [store (.createObjectStore db desc.name (aget desc.keys 0))]
     (util/dorange [n 1 desc.keys.length]
@@ -64,8 +166,13 @@
 (defn- on-blocked [^js/IDBVersionChangeEvent e]
   (js/console.log "blocked" e))
 
+(defn- valid-drop? [^js/DragEvent e]
+  (util/doarray [item (.. e -dataTransfer -items)]
+    #_(when-not (.contains ))))
+
 ;; TODO check if valid drag source
 (defn- on-drag-enter [e]
+
   ;; TODO add drag class
   (util/prevent-default e))
 
@@ -76,10 +183,11 @@
 (defn- on-drag-over [e]
   (util/prevent-default e))
 
-(declare create)
 (defn- on-drop [e]
   (try
-    (util/do-node-list [f e.dataTransfer.files]
+    ;; TODO temporary "fs" with all dropped files -> can still link gltf + buffers + images in single drop
+    ;; - otherwise keep import state -> prompt user for missing files (or create with defaults, then fill later)
+    (util/dolist [f e.dataTransfer.files]
       (create f.name f))
     (catch :default e
       (js/console.log "drop error" e)))
@@ -148,7 +256,7 @@
     (some-> conn .close)
     (set! conn nil)
     (util/inc! version)
-    (-> (open) (.then finish-refresh))))
+    (-> (open) (.then finish-refresh)))) ; TODO (.catch generic-error-handler)
 
 ;; dont care about scenes or specific file formats here
 ;; - just storing file entries, and data blobs
@@ -200,6 +308,7 @@
   "Stores information about an imported file. Actions are dispatched by kind."
   [id  :unique]
   [url :unique]
+  [type]
   [generator]
   [copyright]
   [license])
@@ -226,107 +335,6 @@
 
 
 ;; TODO handlers to generate previews (texture thumbnail, material sphere, mesh scene, audio waveform)
-
-
-;;; Importing Data
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def1 ^:private importers   (js/Map.)) ; imp-id -> importer | set<importer>
-(def1 ^:private extensions  (js/Map.)) ; string -> imp-id
-(def1 ^:private media-types (js/Map.)) ; string -> imp-id
-
-;; TODO importer versioning -> got db of data, URLs to originals; detect what to reimport on changes
-;; - reimport opened assets instantly, otherwise on load or batch on user demand -> expensive operation!
-
-(meta/defenum fetch-type
-  fetch-res
-  fetch-blob
-  fetch-data
-  fetch-json
-  fetch-text
-  fetch-custom)
-
-(defn- add-imp [^js/Map m k v]
-  (if-not (array? k)
-    (.set m k v)
-    (util/doarray [x k]
-      (.set m x v))))
-
-(defn- del-imp [^js/Map m k]
-  (if-not (array? k)
-    (.delete m k)
-    (util/doarray [x k]
-      (.delete m x))))
-
-(defn importer
-  "Registers a new asset importer."
-  [uuid name exts types fetch loader]
-  ;; Old importer.
-  (when-let [^object existing (.get importers uuid)]
-    (del-imp extensions  existing.exts)
-    (del-imp media-types existing.types))
-  ;; New importer.
-  (let [imp #js {:uuid   uuid
-                 :name   name
-                 :exts   exts
-                 :types  types
-                 :fetch  fetch
-                 :loader loader}]
-    (.set importers uuid imp)
-    (add-imp extensions  exts  imp)
-    (add-imp media-types types imp)
-    imp))
-
-(defn- create-with
-  [f ^string url arg]
-  (if-let [m (.match url #"(?:^|/)([^/]+)\.([^.]+)(?:\?|#|$)")]
-     (f url (aget m 1) (aget m 2) arg)
-     (js/Promise.reject url)))
-
-(defn- create-json [blob]
-  (-> (util/response-text blob) ^js/Promise (.then js/JSON.parse)))
-
-(defn- create*
-  [url name ext blob]
-  (let [imp (.get extensions ext)
-        load imp.loader]
-    (case imp.fetch
-      (fetch-custom
-       fetch-res) (js/Promise.reject url) ; TODO can we map Blob to these? what gets affected?
-      (fetch-blob) (load url blob name ext)
-      (-> ^js/Promise
-          ((case imp.fetch
-             fetch-data util/response-data
-             fetch-text util/response-text
-             fetch-json create-json) blob)
-          (.then #(load url % name ext))))))
-
-(defn create
-  "Creates a new asset from a `js/Blob`."
-  [url blob]
-  (create-with create* url blob))
-
-(defn- import*
-  [url name ext]
-  ;; TODO not found
-  (let [imp (.get extensions ext)
-        load imp.loader]
-    (if (= imp.fetch fetch-custom)
-      (load url)
-      (-> (js/fetch url)
-          (.then util/response-test)
-          (.then (case imp.fetch
-                   fetch-res  identity
-                   fetch-data util/response-data
-                   fetch-blob util/response-blob
-                   fetch-json util/response-json
-                   fetch-text util/response-text)) ^js/Promise
-          (.then #(load url % name ext))))))
-
-(defn import
-  "Imports a new asset from a `js/URL` or a string."
-  [url]
-  (create-with import* url nil))
 
 
 ;;; Load Queue

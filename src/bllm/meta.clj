@@ -47,7 +47,7 @@
 (defn parse-struct
   "Analyzes a data structure definition. Returns a seq of field descriptors."
   [env fields]
-  (loop [fields fields
+  (loop [fields (partition 2 fields)
          align  0
          offset 0
          output ()]
@@ -93,13 +93,20 @@
 
 (comment (fourcc :JSON))
 
+(defn- inline-vals? [elems]
+  (and (<= 2 (count elems)) (not (symbol? (second elems)))))
+
+(defn- emit-const
+  ([[sym val]] (emit-const sym val))
+  ([sym val] `(util/defconst ~sym ~val)))
+
 (defm defenum
   "An enumerated type whose domain set is explicitly specified."
   [sym & elems]
   (let [m    (meta sym)
         rev? (:reverse m)
         dir  (if rev? dec inc)
-        val? (and (<= 2 (count elems)) (not (symbol? (second elems))))
+        val? (inline-vals? elems)
         repr (when val? (partition 2 elems))
         view (:repr m)
         xs (cond
@@ -118,8 +125,7 @@
                                 (conj xs [s v]))))))]
     `(do
        ;; Emit each enumerated element as a separate constant definition.
-       ~@(for [[sym val] xs]
-           `(util/defconst ~sym ~val))
+       ~@(map emit-const xs)
        ;; When a representation is requested, emit a conversion function.
        ~(when (and view (not= :fourcc view))
           `(defn ~sym [~'x]
@@ -145,15 +151,17 @@
 (defm defflag
   "Packs one or more boolean attributes into an unsigned int."
   [sym & elems]
-  `(do ~@(loop [elems elems
-                bit   1
-                xs    ()]
-           (if-not elems
-             (reverse xs)
-             (let [x (first elems)]
-               (recur (next elems)
-                      (long (bit-shift-left bit 1))
-                      (conj xs `(util/defconst ~x ~bit))))))))
+  `(do ~@(if (inline-vals? elems)
+           (map emit-const (partition 2 elems))
+           (loop [elems elems
+                  bit   1
+                  xs    ()]
+             (if-not elems
+               (reverse xs)
+               (let [x (first elems)]
+                 (recur (next elems)
+                        (long (bit-shift-left bit 1))
+                        (conj xs (emit-const x bit)))))))))
 
 (defmacro defbits
   "Packs one or more integer attributes into a unsigned int."
@@ -164,14 +172,13 @@
   ;; unpack functions (num -> elem)
   )
 
-(defmacro defstruct
-  "Aggregates one or more attributes into a named structure.
-
-  Elements of the structure are re-ordered to limit padding.
-  This can be disabled using the `:unordered` meta property.
-  "
-  [& args]
-  )
+(defm defstruct
+  [sym & fields]
+  ;; check for common field type (recursive across sub-structures)
+  ;; - ie if all fields are `:u32` -> accept a `Uint32Array` as view, otherwise wrap `DataView`
+  (let [ast (parse-struct &env fields)]
+    `(def ~(vary-meta sym merge (meta ast))
+       "TODO")))
 
 (defmacro defvar
   "Like `def`, but also captures the place as schematic data."

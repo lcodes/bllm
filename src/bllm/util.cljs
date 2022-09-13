@@ -147,3 +147,13 @@
 (defn prevent-default [^js/Event e]
   (.preventDefault e)
   (.stopPropagation e))
+
+(defn then [^js/Promise p f]
+  (if (instance? js/Promise p)
+    (.then p f)
+    (f p)))
+
+(defn finally [^js/Promise p f]
+  (if (instance? js/Promise p)
+    (.finally p f)
+    (do (f) p)))

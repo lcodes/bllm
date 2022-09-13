@@ -25,13 +25,13 @@
 
 (defm defimport
   "Declare a new asset importer. Convenience over `importer`."
-  [sym [url fetch] & loader]
+  [sym [src fetch] & loader]
   (let [m   (meta sym)
-        url (vary-meta url assoc :tag 'js/URL)]
+        src (vary-meta src assoc :tag 'js/object)]
     `(do (defn ~(vary-meta sym assoc :private true)
            ~(if-not fetch
-              `[~url]
-              `[~url ~(vary-meta fetch assoc :tag (fetch-tag fetch))])
+              `[~src]
+              `[~src ~(vary-meta fetch assoc :tag (fetch-tag fetch))])
            ~@loader)
          (bllm.data/importer
           ~(util/unique-id sym)
@@ -47,7 +47,7 @@
     '(defimport test
        {:extension "ext"
         :media-type "hello/world"}
-       [url data]
+       [src data]
        :test))))
 
 (defn- primary-key [[s prop]]

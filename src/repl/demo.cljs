@@ -21,7 +21,7 @@
 (wgsl/defconst EPSILON 1e-10)
 
 (wgsl/defstruct Test
-  [hello :u32])
+  hello :u32)
 
 (meta/defenum bind-group
   FRAME
@@ -39,10 +39,10 @@
   "Values uploaded once per frame to the GPU."
   FRAME
   (wgsl/defbuffer frame
-    [time       :vec4]
-    [sin-time   :vec4]
-    [delta-time :vec4]
-    [number     :u32])
+    time       :vec4
+    sin-time   :vec4
+    delta-time :vec4
+    number     :u32)
   (wgsl/defsampler linear)
   (wgsl/defsampler linear-mip)
   (wgsl/defsampler linear-repeat))
@@ -60,33 +60,33 @@
   (wgsl/deftexture grain-tex   :view-2d :f32)
   (wgsl/deftexture grading-lut :view-3d :f32)
   (wgsl/defbuffer pp
-    [scatter  :f32]
-    [gamma    :f32]
-    [exposure :f32]
-    [dist1    :vec4]
-    [dist2    :vec4]
-    [bloom    :vec4]
-    [grain    :vec4]
-    [grain-st :vec4]
-    [chroma   :f32]
-    [vignette-params :vec3]
-    [vignette-color  :vec3]))
+    scatter  :f32
+    gamma    :f32
+    exposure :f32
+    dist1    :vec4
+    dist2    :vec4
+    bloom    :vec4
+    grain    :vec4
+    grain-st :vec4
+    chroma   :f32
+    vignette-params :vec3
+    vignette-color  :vec3))
 
 (wgsl/defbuffer camera
   ""
   PASS 0
-  [view          :mat4]
-  [proj          :mat4]
-  [view-proj     :mat4]
-  [view-inv      :mat4]
-  [proj-inv      :mat4]
-  [view-proj-inv :mat4])
+  view          :mat4
+  proj          :mat4
+  view-proj     :mat4
+  view-inv      :mat4
+  proj-inv      :mat4
+  view-proj-inv :mat4)
 
 (wgsl/defbuffer screen
   PASS 1
-  [proj-params :vec4]
-  [params      :vec4]
-  [z-buffer    :vec4])
+  proj-params :vec4
+  params      :vec4
+  z-buffer    :vec4)
 
 (wgsl/defgroup gbuffer-data
   PASS
@@ -102,7 +102,7 @@
 (wgsl/definterpolant io-texcoord 0 :vec2)
 
 (wgsl/defbuffer hello EFFECT 0
-  [switch :bool])
+  switch :bool)
 
 (wgsl/defun branch-test :vec3 [a :vec3 b :vec3]
   (let [d (length (a - b))
@@ -439,14 +439,14 @@
   (f0 + ((max (vec3 (1 - roughness)) f0) - f0) * (pow (1 - cos-theta) 5)))
 
 (wgsl/defstruct Surface
-  [world-position :vec3]
-  [world-normal   :vec3]
-  [albedo         :vec3]
-  [emissive       :vec3]
-  [metallic       :f32]
-  [roughness      :f32]
-  [ao             :f32]
-  [occlusion      :f32])
+  world-position :vec3
+  world-normal   :vec3
+  albedo         :vec3
+  emissive       :vec3
+  metallic       :f32
+  roughness      :f32
+  ao             :f32
+  occlusion      :f32)
 
 (wgsl/defgroup lighting-data
   EFFECT
@@ -715,12 +715,6 @@
   (wgsl/defblend blend-test
     :color blend-something
     :alpha blend-default)
-
-  (wgsl/defstruct Hello
-    [world :vec2]
-    [value :u32]
-    [hello :f32]
-    [slide :vec3])
 
   (wgsl/defconst log-base-10
     (1 / (log2 10)))

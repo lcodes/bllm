@@ -2,6 +2,7 @@
   "Development entry point. Attaches a few strings before launching the app."
   (:require [npm.stats.js  :as Stats]
             [devtools.core :as devtools]
+            [re-frame.core :as rf]
             [bllm.util     :as util :refer [def1]]
             [repl.app      :as app]
             [repl.error    :as error]))
@@ -20,11 +21,10 @@
   "Development expands the one <script> into hundreds. Clean up the inspector."
   []
   (let [container (upsert-html-node "div" "scripts")]
-    (util/do-node-list [script (js/document.querySelectorAll "script")]
+    (util/dolist [script (js/document.querySelectorAll "script")]
       (.appendChild container script))))
 
 ;; Launch the application right away. TODO setup dev plugins
-
 (def1 app-ctx
   (do (devtools/install! [:formatters :hints]) ; TODO chrome devtools only
       (app/init fix-scripts)
@@ -33,9 +33,11 @@
 ;; TODO hook Statsjs into the tick loop
 
 (defn ^:before-load on-before-load []
+  (rf/clear-subscription-cache!)
   ;; TODO start collecting changes
   )
 
 (defn ^:after-load on-after-load []
   ;; TODO stop collecting changes, batch execute
+  (app/mount)
   (repl.error/exceptional-resume))
