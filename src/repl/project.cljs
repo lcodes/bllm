@@ -1,5 +1,5 @@
 (ns repl.project
-  "Specialized inspector for ECS worlds."
+  "Specialized inspector for the ECS worlds loaded in memory."
   (:require [bllm.ecs   :as ecs]
             [bllm.scene :as scene]
             [repl.dock  :as dock]))

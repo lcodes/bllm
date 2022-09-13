@@ -16,5 +16,3 @@
   ;; - resize handles, add/remove containers as new areas are formed/emptied
   ;; - emacs/vim inspired UI -> minimal, natural navigation, self-documenting
   [:div "World"])
-
-;; HJKL is the new WSAD

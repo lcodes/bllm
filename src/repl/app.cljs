@@ -15,6 +15,7 @@
    [repl.demo  :as demo]
    [repl.error :as error]
    [repl.game  :as game]
+   [repl.nav   :as nav]
    ;; Plugins
    [bllm.load.cube]
    [bllm.load.gltf]
@@ -64,24 +65,25 @@
   (demo/scene))
 
 (defn- pre-init
-  "Early initialization, before systems. Don't waste any time here."
+  "Early initialization, before systems are initialized. Don't waste time here."
   []
   (error/init)
   (html/add-class main splash-anim-name))
 
 (defn- post-init
-  "Late initialization, after systems."
+  "Late initialization performed while systems are initializing asynchronously."
   []
+  (nav/init)
   (let [noscript (js/document.querySelector "noscript")]
     (.removeChild (html/parent noscript) noscript)))
 
 (defn init
-  "Completely initializes all sub-systems."
-  [init-fn]
+  "Completely initializes all of the engine and application systems."
+  [custom-init]
   (pre-init)
   (let [engine (core/init)]
-    (init-fn)
     (post-init)
+    (custom-init)
     (.then engine start)))
 
 (defn -main

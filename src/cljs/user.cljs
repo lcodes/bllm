@@ -33,11 +33,8 @@
 ;; TODO hook Statsjs into the tick loop
 
 (defn ^:before-load on-before-load []
-  (rf/clear-subscription-cache!)
-  ;; TODO start collecting changes
-  )
+  (rf/clear-subscription-cache!))
 
 (defn ^:after-load on-after-load []
-  ;; TODO stop collecting changes, batch execute
   (app/mount)
   (repl.error/exceptional-resume))
