@@ -1,6 +1,6 @@
 ^{:css-dirs ["resources/public"]}
 {:main cljs.user
- :output-to  "target/public/bllm.js"
+ :output-to  "target/public/repl.js"
  :output-dir "target/public"
  :asset-path ""
  :fn-invoke-direct true
@@ -10,6 +10,10 @@
  :language-out :es6-strict
  :infer-externs true
  :install-deps true
+ ;; TODO none of this is currently used
+ ;; - last time, glm drove too much the design of math code,
+ ;;   - thousands of small Float32Arrays, even on top of a single ArrayBuffer, dont scale
+ ;;   - can do better math lib now
  :externs ["externs/html.js"]
  :foreign-libs [{:file "target/public/npm-deps.js"
                  :provides ["npm.gl-matrix"

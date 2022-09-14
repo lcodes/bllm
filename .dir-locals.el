@@ -62,4 +62,5 @@
                             (put 'wgsl/defpixel         'clojure-doc-string-elt 2)
                             (put 'wgsl/defcompute       'clojure-doc-string-elt 2)
                             (put 'wgsl/defrender        'clojure-doc-string-elt 2)
+                            (put 'ui/defpane            'clojure-doc-string-elt 2)
                             )))))

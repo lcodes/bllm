@@ -44,7 +44,7 @@
 (defn- kebab-capitalize [s re]
   (-> (name s)
       (str/replace re
-                   (fn [^String m]
+                   (fn replacement [^String m]
                      (->> (.length m)
                           (dec)
                           (.charAt m)
@@ -65,6 +65,14 @@
 
 (defn kebab->snake [s]
   (str/replace (name s) \- \_))
+
+(defn label [s]
+  (-> (name s)
+      (str/split #"-")
+      (->> (map str/capitalize)
+           (str/join " "))))
+
+(comment (label 'hello-world))
 
 (def flatten1 (partial apply concat))
 

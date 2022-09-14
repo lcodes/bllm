@@ -1,4 +1,4 @@
-(ns repl.tools)
+(ns repl.tool)
 
 ;; various context-specific toolbox representations
 ;; - bound to a view pane, which has a type and a current asset (which also has a meta schema)
@@ -26,3 +26,6 @@
 ;; just like VIM, get movements and objects;
 ;; - ie 3D movement can be a region within the scene, and every region-making method is valid (pick bounding box, drag view, group bounding boxes, etc)
 ;; - not limited to text as a context; everything is data with the means to understand it at hand
+
+(defn view []
+  [:nav#tool "TOOL BAR"])

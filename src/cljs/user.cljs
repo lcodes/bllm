@@ -5,7 +5,7 @@
             [re-frame.core :as rf]
             [bllm.util     :as util :refer [def1]]
             [repl.app      :as app]
-            [repl.error    :as error]))
+            [repl.halt     :as halt]))
 
 (defn upsert-html-node
   "Locate the matching 'tag#id' HTML element, or create it."
@@ -37,4 +37,4 @@
 
 (defn ^:after-load on-after-load []
   (app/mount)
-  (repl.error/exceptional-resume))
+  (halt/exceptional-resume))

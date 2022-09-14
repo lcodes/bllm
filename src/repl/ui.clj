@@ -21,3 +21,9 @@
 (defm defhandler
   [sym params & handler]
   (emit-event 're-frame.core/reg-event-ctx sym params handler))
+
+(defm defpane
+  [sym & view]
+  `(def ~sym
+     (repl.dock/pane ~(util/unique-id sym) (fn ~sym ~@view)
+                     ~(or (:label (meta sym)) (util/label sym)))))

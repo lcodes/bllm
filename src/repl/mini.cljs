@@ -1,4 +1,4 @@
-(ns repl.status
+(ns repl.mini
   "Similar to mode lines, but for the entire application frame. Tracks focus.")
 
 ;; - background tasks info (load queue, import queue, misc long running promises)
@@ -9,3 +9,6 @@
 ;; - last log message (log level notice and up, otherwise this can change way too fast) (click for full log details broken down by frame)
 ;; - NOTE on clicks -> just like emacs, everything triggers an interactive function;
 ;; - always layer on top of programmatic data api, then code, then meta, then user convenience
+
+(defn view []
+  [:footer#mini "MINI BUFFER"])

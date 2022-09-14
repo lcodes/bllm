@@ -1,4 +1,4 @@
-(ns repl.error
+(ns repl.halt
   "Simple application-wide error handling."
   (:require [bllm.disp :as disp]
             [bllm.util :as util :refer [def1]]))
@@ -29,7 +29,7 @@
 (defn exceptional-pause
   "Called when a thrown `Error` bubbles all the way to the app's frame handler."
   [e resume-fn]
-  (js/console.log e)
+  (js/console.error "halt" e)
   (disp/cancel-frame)
   (set! exceptional-resume-fn resume-fn)
   ;; TODO overlay error on screen, click to resume

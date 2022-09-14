@@ -2,18 +2,19 @@
   (:require [bllm.ecs    :as ecs]
             [bllm.effect :as effect]
             [bllm.gpu    :as gpu]
-            [bllm.mesh   :as mesh]
+            [bllm.model  :as model]
             [bllm.pass   :as pass]
             [bllm.wgsl   :as wgsl]))
 
-(ecs/defc Point
-  )
+(comment
+  (ecs/defc Point
+    )
 
-(ecs/defc Spot
-  )
+  (ecs/defc Spot
+    )
 
-(ecs/defc Directional
-  )
+  (ecs/defc Directional
+    ))
 
 ;; systems to collect culled light data -> upload to GPU
 ;; systems to load, update and batch probe data
