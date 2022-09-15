@@ -4,6 +4,8 @@
             [bllm.scene :as scene]
             [repl.ui    :as ui]))
 
+(set! *warn-on-infer* true)
+
 ;; - world selection (main content, editor scenes, prefabs, etc)
 ;; - scene graph (project organization, arbitrary unordered user defined structure -> creative mental model)
 ;; - hierarchy (local->world transform hierarchy -> strict vector & matrix update order -> high-performance)

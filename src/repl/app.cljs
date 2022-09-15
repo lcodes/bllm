@@ -19,6 +19,7 @@
    [repl.mini :as mini]
    [repl.nav  :as nav]
    [repl.tool :as tool]
+   [repl.ui   :as ui]
    ;; Engine Plugins
    [bllm.load.cube]
    [bllm.load.gltf]
@@ -31,24 +32,16 @@
 
 (set! *warn-on-infer* true)
 
-(def ^:private splash-anim-name
-  "Class name for a CSS animation to entertain the user during initialization."
-  "rotate")
-
 (def1 ^:private ^js/HTMLElement main
   "Application container element. Defined in index.html."
   (js/document.querySelector "main"))
-
-(def1 ^:private ^js/HTMLCanvasElement canvas
-  "Interactive viewport; user input and gfx output."
-  (js/document.createElement "canvas"))
 
 (defn- tick
   "Consume inputs, simulate the next frame of reference, produce outputs."
   []
   (binding [ecs/*world* game/scene]
     (try
-      (disp/request-frame tick) ; TODO frame skipping?
+      (disp/frame tick) ; TODO frame skipping?
       (core/pre-tick)
       ;;(demo/pre-tick)
       (core/tick)
@@ -57,40 +50,39 @@
       (catch :default e
         (halt/exceptional-pause e (util/callback tick))))))
 
-(defn- frame
-  "Root view of the UI component tree. Covers the full browser's client area."
+(ui/deframe window
+  "Root view of the UI component tree. Covers the full client area of `main`."
   []
-  [:div#frame
-   [menu/view]
-   [tool/view]
-   [dock/view]
-   [mini/view]])
+  menu/bar
+  tool/bar
+  dock/bar
+  mini/bar)
 
 (defn mount
   "Entry point for the UI component tree. Called after figwheel loads new code."
   []
-  (dom/render [frame] main))
+  #_(dom/render [window] main))
 
 (defn- start
   "Launch the simulation. All systems are initialized at this point."
   []
   (mount)
-  (html/remove-class main splash-anim-name)
-  ;;(html/replace-children main canvas)
-  ;;(disp/add-viewport canvas js/devicePixelRatio)
-  (disp/request-frame tick)
+  (html/remove-class main "boot")
+  (html/remove-class main "rotate")
   (core/start)
-  (demo/scene))
+  (demo/scene)
+  (disp/frame tick))
 
 (defn- pre-init
   "Early initialization, before systems are initialized. Don't waste time here."
   []
   (halt/init)
-  (html/add-class main splash-anim-name))
+  (html/add-class main "rotate"))
 
 (defn- post-init
   "Late initialization performed while systems are initializing asynchronously."
   []
+  (ui/init main)
   (nav/init)
   (let [noscript (js/document.querySelector "noscript")]
     (.removeChild (html/parent noscript) noscript)))

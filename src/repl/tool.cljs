@@ -1,4 +1,7 @@
-(ns repl.tool)
+(ns repl.tool
+  (:require [repl.ui :as ui]))
+
+(set! *warn-on-infer* true)
 
 ;; various context-specific toolbox representations
 ;; - bound to a view pane, which has a type and a current asset (which also has a meta schema)
@@ -29,3 +32,17 @@
 
 (defn view []
   [:nav#tool "TOOL BAR"])
+
+(ui/defview context
+  {:container view}
+  ;; similar to browser's address bar, but to select the current ECS scene instead of HTML document
+  ;; - easily pull external scenes, get deeplink to share current scene, bookmark, etc
+  )
+
+(ui/defview bookmark
+  ;; favorite deeplinks, from changing ECS scenes to dock panel views
+  )
+
+(ui/defview bar
+  ;; displays a collection of buttons (text, icon or both) mapped to commands
+  )

@@ -5,6 +5,8 @@
             [repl.dock :as dock]
             [repl.ui   :as ui]))
 
+(set! *warn-on-infer* true)
+
 ;; Query, filter, and navigate the local IndexedDB objects
 ;; - got meta about every object store, can generate a ton
 

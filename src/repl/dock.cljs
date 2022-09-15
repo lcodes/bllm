@@ -5,6 +5,8 @@
             [repl.mode :as mode]
             [repl.ui   :as ui]))
 
+(set! *warn-on-infer* true)
+
 (def1 ^:private panes (js/Map.))
 
 (comment (js/console.log panes))
@@ -33,8 +35,8 @@
   []
   )
 
-(defn- panel
-  "A container for `pane` views."
+(defn panel
+  "A `view` container for `pane` views."
   []
   ;; panel controls (close, options, ...)
   ;; tab view (optional)
@@ -60,3 +62,8 @@
   ;; - resize handles, add/remove containers as new areas are formed/emptied
   ;; - emacs/vim inspired UI -> minimal, natural navigation, self-documenting
   [:div#dock "World"])
+
+;; actions:
+;; - split panel (vertical/horizontal), delete, resize, move panels
+;; - nav (change which pane has focus -> direct jump, cycle through, etc)
+;; - change active pane (with per panel history)

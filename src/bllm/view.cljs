@@ -16,6 +16,7 @@
 ;; think emacs window (while the current tab is an emacs frame)
 ;; the closest this entire engine will get to a view-model-controller pattern.
 
+#_
 (ecs/defc Camera
   "Compute a render view every frame."
   ;; TODO not that many cameras overall, large ECS buckets wasteful; fit memory & realloc on rare structural changes

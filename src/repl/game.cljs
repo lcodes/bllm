@@ -1,15 +1,31 @@
 (ns repl.game
   "The main simulation view."
-  (:require [bllm.ecs   :as ecs]
+  (:require [bllm.disp  :as disp]
+            [bllm.ecs   :as ecs]
             [bllm.gpu   :as gpu]
             [bllm.input :as input]
             [bllm.util  :as util :refer [def1]]
             [bllm.view  :as view]
-            [repl.dock  :as dock]))
+            [repl.ui    :as ui]))
+
+(set! *warn-on-infer* true)
 
 (def1 scene "The ECS world currently being simulated." nil)
 
 (def1 camera "The camera Entity within the ECS world." 0)
+
+(ui/defview port
+  {:elem :canvas}
+  []
+  ;; on mount: register input events, create swapchain as state, connect viewport to camera
+
+  ;; use element visibility to enable/disable associated views
+  ;; - draw every enabled view based on their configured framerate & state
+  ;;   (ie idle at 5fps, editor at 10fps, preview at 30, run at 60)
+  )
+
+;;(disp/add-viewport canvas js/devicePixelRatio)
+
 
 ;; controls
 ;; - canvas mode (single, split, )
@@ -22,8 +38,3 @@
 ;; - subscenes are usually tiny (displaying a handful of meshes, materials and maybe a skybox)
 ;;   - mostly self-contained worlds to edit one partifular asset within a simulated environment
 ;;   - right now `app` system loop is hardcoded, but possible to do once ECS takes over systems
-
-;; bigger component
-;; - on mount: register input events, create swapchain as state, connect viewport to camera
-(defn view []
-  [:canvas.pane.game-view])

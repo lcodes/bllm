@@ -52,14 +52,14 @@
 (def1 ^:private reg nil)
 
 ;; TODO WebXR will replace these for higher FPS in HMD mode.
-(defn- setup-frame []
+(defn- setup []
   (set! caf window.cancelAnimationFrame)
   (set! raf window.requestAnimationFrame))
 
-(defn request-frame [tick-fn]
+(defn frame [tick-fn]
   (set! reg (raf tick-fn)))
 
-(defn cancel-frame []
+(defn cancel []
   (when reg
     (caf reg)
     (set! reg nil)))
@@ -132,7 +132,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn init []
-  (setup-frame)
+  (setup)
   (js/addEventListener "resize"           (util/callback on-resize))
   (js/addEventListener "visibilitychange" (util/callback on-visibility-change))
   (js/addEventListener "fullscreenchange" (util/callback on-fullscreen-change)))

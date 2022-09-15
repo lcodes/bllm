@@ -3,6 +3,8 @@
   (:require [bllm.disp :as disp]
             [bllm.util :as util :refer [def1]]))
 
+(set! *warn-on-infer* true)
+
 (defn- on-window-error [msg file line col error]
   (js/console.error msg error))
 
@@ -30,7 +32,7 @@
   "Called when a thrown `Error` bubbles all the way to the app's frame handler."
   [e resume-fn]
   (js/console.error "halt" e)
-  (disp/cancel-frame)
+  (disp/cancel)
   (set! exceptional-resume-fn resume-fn)
   ;; TODO overlay error on screen, click to resume
   )
@@ -40,5 +42,5 @@
   []
   (when exceptional-resume-fn
     ;; TODO remove overlay
-    (disp/request-frame exceptional-resume-fn)
+    (disp/frame exceptional-resume-fn)
     (set! exceptional-resume-fn nil)))

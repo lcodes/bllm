@@ -1,6 +1,10 @@
 (ns repl.nav
+  "User interface focus navigation. From HTML5 history to interactive commands."
   (:require [bllm.input :as input]
-            [bllm.util  :as util :refer [def1]]))
+            [bllm.util  :as util :refer [def1]]
+            [repl.ui    :as ui]))
+
+(set! *warn-on-infer* true)
 
 ;; HTML5 history -> entry point to app state deeplinks
 ;; - many views, each with their own nav history (like emacs windows in a frame)

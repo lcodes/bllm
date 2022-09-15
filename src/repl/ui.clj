@@ -22,8 +22,22 @@
   [sym params & handler]
   (emit-event 're-frame.core/reg-event-ctx sym params handler))
 
-(defm defpane
+(defm deframe
+  "Defines a configurable UI view container. Pulls `re-frame` off the wall."
+  [sym & initial-views]
+
+  )
+
+(defm defview
+  "Defines a configurable UI view panel."
   [sym & view]
   `(def ~sym
-     (repl.dock/pane ~(util/unique-id sym) (fn ~sym ~@view)
+     (repl.ui/view
+      )))
+
+(defm defmode
+  "Defines a UI mode. Has an associated asset definition and selection."
+  [sym & pane]
+  `(def ~sym
+     (repl.dock/pane ~(util/unique-id sym) (fn ~sym ~@pane)
                      ~(or (:label (meta sym)) (util/label sym)))))
