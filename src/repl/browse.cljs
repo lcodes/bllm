@@ -39,21 +39,22 @@
 ;;   - result is always a set of "interactive" textures -> need `input` event routers & raycasters
 ;;   - like pixi, but even faster, for more than sprites
 
+#_
 (ui/defevent on-folder-select
   [])
 
 (ui/defevent on-folder-history
   #_{:with [save-selected-folder
           path-project]}
-  [db [_ prev?]]
+  [db prev?]
   )
 
 (ui/defevent file-select
-  [db [_ id]]
+  [db id]
   )
 
 (ui/defeffect file-use
-  [{:keys [db]} [_ id]]
+  [{:keys [db]} id]
   (let [info (get-in db [:assets id])]
     ))
 

@@ -74,6 +74,10 @@
 ;; https://developer.mozilla.org/en-US/docs/Web/API/Resize_Observer_API
 ;; https://developer.mozilla.org/en-US/docs/Web/API/Window/resize_event
 
+;; TODO:
+;; https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API
+;; - mark invisible viewports as such; render pipeline ignoring disabled views
+
 (def1 viewports #js [])
 
 (defn find-viewport [canvas]

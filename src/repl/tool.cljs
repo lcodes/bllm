@@ -30,11 +30,7 @@
 ;; - ie 3D movement can be a region within the scene, and every region-making method is valid (pick bounding box, drag view, group bounding boxes, etc)
 ;; - not limited to text as a context; everything is data with the means to understand it at hand
 
-(defn view []
-  [:nav#tool "TOOL BAR"])
-
 (ui/defview context
-  {:container view}
   ;; similar to browser's address bar, but to select the current ECS scene instead of HTML document
   ;; - easily pull external scenes, get deeplink to share current scene, bookmark, etc
   )
@@ -43,6 +39,14 @@
   ;; favorite deeplinks, from changing ECS scenes to dock panel views
   )
 
-(ui/defview bar
+(ui/defview buttons
   ;; displays a collection of buttons (text, icon or both) mapped to commands
+  ;; TODO allow multiple instances of this (different button bars for different features)
   )
+
+(ui/deframe bar
+  {:elem :nav}
+  []
+  context
+  bookmark
+  buttons)

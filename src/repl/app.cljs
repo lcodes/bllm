@@ -61,7 +61,7 @@
 (defn mount
   "Entry point for the UI component tree. Called after figwheel loads new code."
   []
-  #_(dom/render [window] main))
+  (dom/render [window] main))
 
 (defn- start
   "Launch the simulation. All systems are initialized at this point."

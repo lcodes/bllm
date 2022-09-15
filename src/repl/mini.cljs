@@ -77,6 +77,3 @@
   ;; - its view containers within view containers, ultimately reaching views
   ;; - then its panel and panes and individual components and finally controls
   )
-
-(defn view []
-  (ui/container ::view))

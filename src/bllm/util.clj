@@ -83,6 +83,9 @@
 (defn field-name [s]
   (symbol (str \- s)))
 
+(defn ns-keyword [s]
+  (keyword (str *ns*) (name s)))
+
 (defn sym [^clojure.lang.Keyword k]
   (.sym k))
 

@@ -47,21 +47,14 @@
   ;; mode line (optional)
   )
 
-(defn- emit-css-grid
-  []
-  ;; convert data definition of layout to CSS grid
-  ;; - can move things around from one snapshot to the other, without having to recreate dom nodes -> lots of work avoided!
-  ;; - more flexible than flex, at least for this
-  )
-
-(defn view
+(ui/defview bar
   "The main application view is a fully customizable dock."
   []
   ;; dock containers
   ;; - each container is a tab view and a current pane view
   ;; - resize handles, add/remove containers as new areas are formed/emptied
   ;; - emacs/vim inspired UI -> minimal, natural navigation, self-documenting
-  [:div#dock "World"])
+  )
 
 ;; actions:
 ;; - split panel (vertical/horizontal), delete, resize, move panels

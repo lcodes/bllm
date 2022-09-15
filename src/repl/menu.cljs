@@ -6,9 +6,6 @@
 ;; main menu (usually hidden to save screen space -> still display when pressing ALT or enabled)
 ;; popup menus (same logic as main menu, but on button press or context events)
 
-(defn view []
-  [:header#menu "MENU"])
-
 (ui/defview title
   ;; application icon, system menu
   )
@@ -24,3 +21,10 @@
   ;; if running in electron, displays the minimize, maximize and close buttons
   ;; NOTE needs to be displayed even if the menu view is disabled (but still allow power disable)
   )
+
+(ui/deframe bar
+  {:elem :header}
+  []
+  title
+  workspaces
+  system)
