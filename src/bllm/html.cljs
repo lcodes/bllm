@@ -20,3 +20,8 @@
 
 (defn replace-children [^js/Element elem x]
   (.replaceChildren elem x))
+
+(defn class [name-a name-b]
+  (cond (nil? name-a) name-b
+        (nil? name-b) name-a
+        :else (str name-a \space name-b)))

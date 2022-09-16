@@ -35,7 +35,7 @@
   []
   )
 
-(defn panel
+(ui/defview panel
   "A `view` container for `pane` views."
   []
   ;; panel controls (close, options, ...)
@@ -45,11 +45,12 @@
   ;;   - regardless of the current list of tabs; adds a tab if new to this panel, dont need fancy tab mgmt, most likely end up off
   ;; content
   ;; mode line (optional)
-  )
+  [:div.panel "TODO"])
 
-(ui/defview bar
+(ui/deframe bar
   "The main application view is a fully customizable dock."
-  []
+  {:class "grow"}
+  [ui/node panel]
   ;; dock containers
   ;; - each container is a tab view and a current pane view
   ;; - resize handles, add/remove containers as new areas are formed/emptied

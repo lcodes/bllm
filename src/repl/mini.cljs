@@ -34,47 +34,70 @@
 ;;   - vim-style command language is the foundation everywhere, a composable command language with leader keys
 ;;   - command input take focus priority, can still navigate mid-command (ie drag object from any view as arg)
 
-(ui/defview log-message
-  []
-  "Hello World")
-
 (ui/defview background-tasks
   []
-  "icon + status + count + popup")
+  [:div.background-tasks
+   [:span.icon "📝"]
+   "0"])
+
+(ui/defview log-message
+  []
+  [:div.grow.log-message "Hello World"])
+
+;; TODO move these actions to another module.
+(defn play-reverse [])
+(defn play|pause [])
+(defn stop [])
+(defn record [])
+(defn step-back [])
+(defn step-forward [])
+(defn goto-beginning [])
+(defn goto-end [])
+(defn pack [])
+(defn options [])
+
+(defn- engine-btn [label click]
+  [:li.icon [:button.engine-btn {:on-click click} label]])
 
 (ui/defview engine-controls
   "What do we want? Faster horses! What is this car you speak of? What's a cdr?"
   []
-  "icon buttons")
+  [:div.flex.engine-controls
+   [:ul.btns
+    [engine-btn "⏮" goto-beginning]
+    [engine-btn "⏪" step-back]
+    [engine-btn "◀" play-reverse]
+    [engine-btn "▶" play|pause] ; TODO "⏸" pause label dependent on engine state
+    [engine-btn "⏹" stop]
+    [engine-btn "⏺" record] ; TODO red when recording (also `recording-mode` as filter over UI)
+    [engine-btn "⏩" step-forward]
+    [engine-btn "⏭" goto-end]]
+   [:ul.btns
+    [engine-btn "📦" pack]
+    [engine-btn "⚙" options]]])
 
 (ui/defview layout-select
   []
-  "Name + dropdown")
+  [:select.layout ; TODO select2 or custom replacement
+   [:option "Default"]])
+
+(ui/defview user-button
+  []
+  [:div.user-button]
+  [:div "Myself 👤"])
 
 (ui/defview status-icons
   []
   ;; configure which "services" to display the status of, define notion of service
-  "Status icons")
-
-(ui/defview user-account
-  []
-  "Icon + name + dropdown")
+  [:div "🖧 🔌 🔋 🔊"])
 
 (ui/deframe bar
   "The mini-bar is stocked with specialty beverages and snacks for visitors."
   {:elem :footer}
-  ;; TODO as hiccup? would allow passing props, not needed for now
-  [ui/node log-message]
-  [ui/node background-tasks]
+  ;; TODO grab state of system frames from filtering nodes, then sorting by priority (neg to left, pos to right)
   [ui/node engine-controls]
+  [ui/node background-tasks]
+  [ui/node log-message]
   [ui/node layout-select]
-  [ui/node status-icons]
-  [ui/node user-account]
-  ;; whats needed here?
-  ;; - ui component is delegated to ui/view-container, ::bar is the view-key
-  ;; - initial app-db state -> in case no layout to restore, or reset by user
-  ;; - use view-key to toggle on/off, removing app component entirely if off
-  ;; - let user customize root app layout as a view container as well!
-  ;; - its view containers within view containers, ultimately reaching views
-  ;; - then its panel and panes and individual components and finally controls
-  )
+  [ui/node user-button]
+  [ui/node status-icons])

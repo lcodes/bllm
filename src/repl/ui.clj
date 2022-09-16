@@ -59,7 +59,10 @@
 (defm deframe
   "Defines a configurable UI view container. Pulls `re-frame` off the wall."
   [sym & initial-views]
-  `(def ~sym (repl.ui/frame ~(util/ns-keyword sym) [~@initial-views])))
+  (let [m (meta sym)]
+    `(def ~sym (repl.ui/frame ~(util/ns-keyword sym)
+                              ~(:elem m) ~(:class m)
+                              [~@initial-views]))))
 
 (defm defview
   "Defines a configurable UI view panel."

@@ -102,11 +102,27 @@ main.init {
 /* UI View Containers */
 /******************************************************************************/
 
-.view-container {
+.frame {
+  display: flex;
   background: var(--bg-body);
   padding: 2px;
 }
 
+.flex { display: flex; }
+.grow { flex-grow: 1; }
+
+.col { flex-direction: column; }
+.row { flex-direction: row; }
+
+
+.tabs {
+  display: flex;
+  flex-grow: 1;
+}
+
+.btns {
+  display: flex;
+}
 
 
 /* Menu Views */

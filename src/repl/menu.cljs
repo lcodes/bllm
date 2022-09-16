@@ -8,14 +8,14 @@
 
 (ui/defview title
   ;; application icon, system menu
-  [:h1.title "The REPL"])
+  [:h1.title "REPL"])
 
 (ui/defview workspaces
   ;; main application tabs (ie going from scene view to material editor)
   ;; - distinct from dock layouts (each workspace has a current layout)
   ;;   - nothing is hardcoded (ie one workspace could be scene view AND material editor side by side)
   ;; inspired from Doom Emacs workspaces
-  [:ul.workspaces
+  [:ul.tabs.workspaces
    ;; each workspace get its own `ui/state` replacement, instantly swapping the active views, panes, menus and modes.
    [:li "Editor"]  ; Default view; game viewport, world content, database browser, log console, collaboration room (from chat to VR -> REPL in REPL)
    [:li "Shaders"] ; Work with `bllm.wgsl` graph nodes; preview scene, visual code, node toolkit, properties, relevant assets filter
@@ -40,10 +40,10 @@
 
 (ui/defview system
   ;; TODO needs to be displayed even if the menu view is disabled (but still allow power disable)
-  [:ul.system
-   [:li (system-btn "Minimize" on-minimize)]
-   [:li (system-btn "Maximize" on-maximize)]
-   [:li (system-btn "Close"    on-close)]])
+  [:ul.btns.system
+   [:li (system-btn "🗕" on-minimize)]
+   [:li (system-btn "🗖" on-maximize)]
+   [:li (system-btn "🗙" on-close)]])
 
 (ui/deframe bar
   {:elem :header}

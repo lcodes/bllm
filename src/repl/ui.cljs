@@ -3,6 +3,7 @@
   (:require-macros [repl.ui])
   (:require [reagent.core  :as rc]
             [re-frame.core :as rf]
+            [bllm.html :as html]
             [bllm.util :as util :refer [def1]]))
 
 (set! *warn-on-infer* true)
@@ -187,20 +188,21 @@
 
 (defn pretty [x]
   ;; TODO throw this to a code highlighter (embedded text editor or custom built)
-  [:pre (with-out-str (cljs.pprint/pprint x))])
+  [:pre.tty (with-out-str (cljs.pprint/pprint x))])
+
 
 
 ;;; System Views - Managed components with durable state and a delegated render.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn frame
-  [k initial-views]
-  (register {:kind :frame :name k :init initial-views}))
+  [k elem class initial-views]
+  (register {:kind :frame :name k :init initial-views :elem elem :class class}))
 
-(defmethod node* :frame [{:keys [init]} view]
+(defmethod node* :frame [{:keys [init elem class]} v]
   ;; TODO layout (vertical, horizontal) (reverse) (align, justify)
   ;; TODO id (keyword or number) and class names (semantic styles)
-  `[:div.frame ~@init])
+  `[~(or elem :div) {:class ~(html/class "frame" class)} ~@init])
 
 (defn view
   [k hiccup]
