@@ -47,11 +47,12 @@
   (let [specs (partition 2 spec+inits)
         inits (map second specs)
         syms  (map first  specs)
-        keys  (map util/ns-keyword syms)]
+        keys  (map util/ns-keyword syms)
+        atom  (sub sym)]
     `(binding [reagent.ratom/*ratom-context* true] ; Don't warn, globals are fun
        (def ~sym ~(util/ns-keyword sym))
-       (def ~(sub sym) (repl.ui/$db ~sym))
-       (let [~'q (fn [] ~sym)] ; Privately reusable intermediate sub signal.
+       (def ~atom (repl.ui/$db ~sym))
+       (let [~'q (fn [] ~atom)] ; Privately reusable intermediate sub signal.
          ~@(map emit-schema-sub syms keys))
        (repl.ui/schema ~sym ~(zipmap keys inits)))))
 
@@ -63,8 +64,7 @@
 (defm defview
   "Defines a configurable UI view panel."
   [sym & view]
-  `(def ~sym #_(repl.ui/view ~(util/ns-keyword sym)
-                           (fn ~sym [] ~@view))))
+  `(def ~sym (repl.ui/view ~(util/ns-keyword sym) (fn ~sym [] ~@view))))
 
 (defm defmode
   "Defines a UI mode. Has an associated asset definition and selection."

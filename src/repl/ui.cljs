@@ -54,7 +54,7 @@
 
 (rf/reg-sub
  extraction-get-key
- (fn $get-q [_ [_ _ parent-sub]]
+ (fn $get-q [[_ _ parent-sub]]
    parent-sub)
  (fn $get [m [_ k]]
    (get m k)))
@@ -64,19 +64,15 @@
   [from k]
   ($ (vector extraction-get-key k from)))
 
-#_
-{:name :repl.example/something
- :kind ::frame
- :init identity ; React.Component, reagent view (all 3 forms), hiccup fragment,
- }
-
 (declare state)
 (declare nodes)
 
 (defn- do-register [m node]
   (assoc-in m [state nodes (:name node)] node))
 
-(repl.ui/defevent ^:private on-register do-register)
+(repl.ui/defevent ^:private on-register
+  [db node]
+  (do-register db node))
 
 (defn register
   "Registers a managed UI `node`."
@@ -92,9 +88,9 @@
 (def ^:private merge-schema (partial merge-with merge-schema-spec))
 
 (repl.ui/defevent ^:private on-schema
-  [db {:as m :keys [name]}]
+  [db {:as m :keys [name init]}]
   (-> db
-      (update name merge-schema m)
+      (update name merge-schema init)
       (do-register m)))
 
 (defn schema
@@ -115,6 +111,8 @@
   prefs {} ; "Configurable user options (opt key -> value)"
   ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
   )
+
+(comment @($get nodes-sub state))
 
 #_(repl.ui/defcofx local
   []
@@ -187,32 +185,32 @@
      ;; TODO every `n` can be wrapped by `error-boundary` or `strict-mode`, state is `v`
      (node* n v)))) ; TODO further transforms? ie automated ID/classnames or data-*
 
+(defn pretty [x]
+  ;; TODO throw this to a code highlighter (embedded text editor or custom built)
+  [:pre (with-out-str (cljs.pprint/pprint x))])
+
 
 ;;; System Views - Managed components with durable state and a delegated render.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn frame
+  [k initial-views]
+  (register {:kind :frame :name k :init initial-views}))
+
+(defmethod node* :frame [{:keys [init]} view]
+  ;; TODO layout (vertical, horizontal) (reverse) (align, justify)
+  ;; TODO id (keyword or number) and class names (semantic styles)
+  `[:div.frame ~@init])
+
 (defn view
-  "Registers a managed UI view, to be displayed as part of a `container`."
   [k hiccup]
   ;; view hash, label, view function, context flags, preferred container
   ;; flags include singleton, system, pane etc
-  k)
+  (register {:kind :view :name k :init hiccup}))
 
-(defmethod node* :view [n v]
-  [:div "VIEW"])
-
-(defn frame
-  "Displays the `views` components matching the given `view-key`."
-  [k initial-views]
-  ;; TODO layout (vertical, horizontal) (reverse) (align, justify)
-  ;; TODO id (keyword or number) and class names (semantic styles)
-  )
-
-(defmethod node* :frame [n v]
-  [:div.frame "FRAME"]
-  #_
-  [:div.frame {:id view-key :key view-key :class ""}
-   (cljs.pprint/pprint @(views view-key))])
+(defmethod node* :view [{:keys [init]} v]
+  ;; view options (ID/class, managed hooks)
+  (init v))
 
 
 ;;; Modal Panes - Managed views with associated selection data and editor modes.
@@ -225,7 +223,9 @@
 
 (defn pane
   [k view]
-  k)
+  ;; kinda analogue to model shaders -> where views are effect shaders, and components are system shaders.
+  ;; GOOD -> UI shaders is the next logical step
+  (register {:kind :pane :name k :init view}))
 
 (defmethod node* :pane [n v]
   [:div "PANE"])

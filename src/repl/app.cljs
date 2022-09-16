@@ -53,7 +53,7 @@
   "Root view of the UI component tree. Covers the full client area of `main`."
   [ui/node menu/bar]
   [ui/node tool/bar]
-  [ui/node dock/bar]
+  ;[ui/node dock/bar]
   [ui/node mini/bar])
 
 (defn mount

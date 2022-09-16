@@ -64,12 +64,12 @@
   "The mini-bar is stocked with specialty beverages and snacks for visitors."
   {:elem :footer}
   ;; TODO as hiccup? would allow passing props, not needed for now
-  log-message
-  background-tasks
-  engine-controls
-  layout-select
-  status-icons
-  user-account
+  [ui/node log-message]
+  [ui/node background-tasks]
+  [ui/node engine-controls]
+  [ui/node layout-select]
+  [ui/node status-icons]
+  [ui/node user-account]
   ;; whats needed here?
   ;; - ui component is delegated to ui/view-container, ::bar is the view-key
   ;; - initial app-db state -> in case no layout to restore, or reset by user
