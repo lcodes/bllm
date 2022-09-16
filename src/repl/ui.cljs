@@ -20,54 +20,118 @@
 
 ;; https://day8.github.io/re-frame/subscriptions/
 
-(def sub rf/subscribe)
+;; Don't forget:
+;; - reading and writing to the app-db are *completely* decoupled, by design.
+;; - reason for single app-db instead of spread data fragments is frame unit.
+;;   - no matter the scope and depth of an event handler's reach, one update.
+;; - doesn't mean a few rules can't be bent first, like a partial subs graph.
+;;   - common patterns in data extraction also emit schemas and initializers.
+;;   - as convenience, of course, all UI macros just expand the scaffoldings.
 
-(def extraction-sub-key :db)
+(util/defalias $ rf/subscribe)
 
-(rf/reg-sub extraction-sub-key (fn extract [db [_ k]] (get db k)))
+(util/defconst extraction-sub-key ::db)
+(util/defconst extraction-get-key ::get)
 
-(defn- extract
+(rf/reg-sub
+ extraction-sub-key
+ ;; `parent-sub` is `re-frame.db/app-db` implicitly.
+ (fn $db [db [_ k]]
+   (get db k)))
+
+(defn- $db
   "Specialized subscription to extract top-level data from the app-db.
 
   Doesn't look inside the data, doesn't support nested lookups. By design.
 
   NOTE prefer this over `sub` for 'Layer 2' subscriptions. The root of the
   app-db has to be fairly shallow, for all its keys are potential flows on
-  update. This pattern ensures high-efficiency of the entire signal graph."
+  update. This pattern ensures high-efficiency of the entire signal graph.
+
+  NOTE automatically used by `defschema` to extract its defined UI state."
   [k]
-  (sub (vector extraction-sub-key k)))
+  ($ (vector extraction-sub-key k)))
 
-(defn- merge-schema-1 [db init]
+(rf/reg-sub
+ extraction-get-key
+ (fn $get-q [_ [_ _ parent-sub]]
+   parent-sub)
+ (fn $get [m [_ k]]
+   (get m k)))
+
+(defn- $get
+  "Wild idea. Hope it works."
+  [from k]
+  ($ (vector extraction-get-key k from)))
+
+#_
+{:name :repl.example/something
+ :kind ::frame
+ :init identity ; React.Component, reagent view (all 3 forms), hiccup fragment,
+ }
+
+(declare state)
+(declare nodes)
+
+(defn- do-register [m node]
+  (assoc-in m [state nodes (:name node)] node))
+
+(repl.ui/defevent ^:private on-register do-register)
+
+(defn register
+  "Registers a managed UI `node`."
+  [node]
+  (rf/dispatch [on-register node])
+  (:name node))
+
+(defn- merge-schema-spec [db init]
   (if (map? init)
-    (merge db init)
-    (or db init)))
+    (merge init db)
+    (or db init))) ; TODO unless type changed? (ie refactor [] to #{})
 
-(def ^:private merge-schema (partial merge-with merge-schema-1))
+(def ^:private merge-schema (partial merge-with merge-schema-spec))
 
-(repl.ui/defevent init-schema
-  "Initialize schema fragments defined by `defschema`."
-  [db k specs]
-  (update db k merge-schema specs))
+(repl.ui/defevent ^:private on-schema
+  [db {:as m :keys [name]}]
+  (-> db
+      (update name merge-schema m)
+      (do-register m)))
+
+(defn schema
+  [key specs]
+  (let [node {:kind :schema :name key :init specs}]
+    (rf/dispatch [on-schema node])
+    key))
 
 (repl.ui/defschema state
   "UI state describing the state of the UI. What condition was my condition in?"
-  theme :default
-  style {}
-  menus {}
-  panes {}
-  views {}
-  prefs {})
+  {:store :user} ; TODO use this to make durable and specify data store (:user delegates to session/local storage, or cloud later)
+  theme :default ; TODO hardcoded -> swap css vars -> swap `style` entries -> zen garden
+  style {} ; "CSS 'components' (later -> raw CSS used now)"
+  menus {} ; "Command components (view ID -> view trigger)"
+  panes {} ; "Instanced components (view ID -> view state)"
+  views {} ; "Singleton components (viewkey -> view state)"
+  nodes {} ;
+  prefs {} ; "Configurable user options (opt key -> value)"
+  ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
+  )
+
+#_(repl.ui/defcofx local
+  []
+  )
+
+#_(repl.ui/defx local!
+  [_event k v]
+  )
+
+#_(repl.ui/defeffect set-pref
+  {:args false}
+  [{:keys [db]} [_event k v :as event]]
+  {:db db ; TODO update
+   local! event}) ; TODO not always to local storage
+
 
 (comment (js/console.log (deref re-frame.db/app-db)))
-
-(repl.ui/defevent init-frame
-  ;; pull `k` from localStorage as coeffect, use instead of specs if present
-  [db k specs]
-  (js/console.log db k specs)
-  db)
-
-(defn frame [k]
-  [:div "TODO"])
 
 
 ;;; System Components - Self-contained implementation, no managed customization.
@@ -99,21 +163,55 @@
   []
   )
 
+(defmulti node*
+  "Every method implements a unique kind of managed view, see also `node`."
+  (fn node-dispatch [n v]
+    (:kind n)))
+
+(defmethod node* :default [{:as node :keys [kind]} data]
+  [:div.error
+   [:h3 (cond (nil? node) "Missing node"
+              (nil? kind) "Invalid node"
+              :else       "Missing kind")]
+   ;; TODO retry button (refresh at REPL without figwheel reload)
+   [:pre (cljs.pprint/pprint node)]
+   [:pre (cljs.pprint/pprint data)]])
+
+(defn node
+  "Component host to a managed `view` and its state data."
+  ([node-k] ; Singleton view
+   (node node-k node-k))
+  ([node-k view-k] ; Instanced view
+   (let [n @($get nodes-sub node-k)
+         v @($get views-sub view-k)]
+     ;; TODO every `n` can be wrapped by `error-boundary` or `strict-mode`, state is `v`
+     (node* n v)))) ; TODO further transforms? ie automated ID/classnames or data-*
+
 
 ;;; System Views - Managed components with durable state and a delegated render.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn view
   "Registers a managed UI view, to be displayed as part of a `container`."
-  []
+  [k hiccup]
   ;; view hash, label, view function, context flags, preferred container
   ;; flags include singleton, system, pane etc
+  k)
+
+(defmethod node* :view [n v]
+  [:div "VIEW"])
+
+(defn frame
+  "Displays the `views` components matching the given `view-key`."
+  [k initial-views]
+  ;; TODO layout (vertical, horizontal) (reverse) (align, justify)
+  ;; TODO id (keyword or number) and class names (semantic styles)
   )
 
-(defn view-container
-  "Displays the `view` components matching the given `view-key`."
-  [view-key]
-  [:div.view-container {:class (name view-key)}
+(defmethod node* :frame [n v]
+  [:div.frame "FRAME"]
+  #_
+  [:div.frame {:id view-key :key view-key :class ""}
    (cljs.pprint/pprint @(views view-key))])
 
 
@@ -122,20 +220,22 @@
 
 (defn mode
   "Modes are sets of features that customize the behavior of view panes."
-  []
-  )
+  [k init]
+  k)
 
 (defn pane
-  []
-  )
+  [k view]
+  k)
+
+(defmethod node* :pane [n v]
+  [:div "PANE"])
 
 
 ;;; UI System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn init [frame]
+(defn init [app-container]
   ;; hook input events
-  ;; init app db
-  ;; restore UI state
+
+  ;; pull initial state from sessionStorage, localStorage and IndexedDB?
   )
-:hello

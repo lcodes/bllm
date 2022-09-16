@@ -540,8 +540,8 @@
                 ids))
           (.add node.uuid))))
   ;; Debug
-  (js/console.log node)
-  (when node.wgsl (js/console.log node.wgsl))
+  #_(js/console.log node)
+  #_(when node.wgsl (js/console.log node.wgsl))
   node)
 
 (defn- bind-group-layout [node]

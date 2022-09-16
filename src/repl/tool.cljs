@@ -46,7 +46,6 @@
 
 (ui/deframe bar
   {:elem :nav}
-  []
   context
   bookmark
   buttons)

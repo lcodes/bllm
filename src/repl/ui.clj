@@ -2,13 +2,16 @@
   (:require [bllm.util :as util :refer [defm]]
             [clojure.string :as str]))
 
-(defn- emit-event [reg sym [node & args] handler]
+(defn- emit-event [reg sym params handler]
   (let [a (gensym "args")
-        f `(fn ~sym [~node ~a]
-             ~(if (empty? args)
-                `(do ~@handler)
-                `(let [[_# ~@args] ~a]
-                   ~@handler)))]
+        f (if (and (symbol? params) (empty? handler))
+            params
+            (let [[node & args] params]
+              `(fn ~sym [~node ~a]
+                 ~(if (empty? args)
+                    `(do ~@handler)
+                    `(let [[_# ~@args] ~a]
+                       ~@handler)))))]
     `(do (def ~sym ~(keyword (str *ns*) (str/replace (name sym) #"^on-" "")))
          ~(if-let [w (:with (meta sym))]
             `(~reg ~sym ~w ~f)
@@ -27,26 +30,14 @@
   [sym params & handler]
   (emit-event 're-frame.core/reg-event-ctx sym params handler))
 
+(defn- sub [sym]
+  (symbol (str sym "-sub")))
+
 (defn- emit-schema-sub
-  [sym key init]
-  (let [kind (cond (keyword? init) :key
-                   (vector?  init) :vec
-                   (set?     init) :set
-                   (map?     init) :map)]
-    `(let [~'kw ~key]
-       (re-frame.core/reg-sub
-        ~'kw ~'q
-        ~(case kind
-           (:key
-            :vec
-            :set) 'kw
-           (:map) `(fn ~sym [data# [_ key#]]
-                     (get data# key#))))
-       ~(case kind
-          (:key
-           :vec
-           :set) `(def  ~sym      (repl.ui/sub [~'kw]))
-          (:map) `(defn ~sym [k#] (repl.ui/sub [~'kw k#]))))))
+  [sym key]
+  `(do (def ~sym ~key)
+       (re-frame.core/reg-sub ~sym ~'q ~sym)
+       (def ~(sub sym) (repl.ui/$ [~sym]))))
 
 (defm defschema
   "Defines a data schema as a view model of the `re-frame.db/app-db` structure.
@@ -58,32 +49,36 @@
         syms  (map first  specs)
         keys  (map util/ns-keyword syms)]
     `(binding [reagent.ratom/*ratom-context* true] ; Don't warn, globals are fun
-       (let [schema# ~(util/ns-keyword sym)]
-         (re-frame.core/dispatch-sync
-          [repl.ui/init-schema schema# ~(zipmap keys inits)])
-         (def ~sym (repl.ui/extract schema#))
-         (let [~'q (fn [] ~sym)]
-           ~@(map emit-schema-sub syms keys inits))))))
+       (def ~sym ~(util/ns-keyword sym))
+       (def ~(sub sym) (repl.ui/$db ~sym))
+       (let [~'q (fn [] ~sym)] ; Privately reusable intermediate sub signal.
+         ~@(map emit-schema-sub syms keys))
+       (repl.ui/schema ~sym ~(zipmap keys inits)))))
 
 (defm deframe
   "Defines a configurable UI view container. Pulls `re-frame` off the wall."
   [sym & initial-views]
-  `(let [key# ~(util/ns-keyword sym)]
-     (re-frame.core/dispatch-sync
-      [repl.ui/init-frame key# [~@initial-views]])
-     (defn ~sym []
-       (repl.ui/frame key#))))
+  `(def ~sym (repl.ui/frame ~(util/ns-keyword sym) [~@initial-views])))
 
 (defm defview
   "Defines a configurable UI view panel."
   [sym & view]
-  `(def ~sym
-     (repl.ui/view
-      )))
+  `(def ~sym #_(repl.ui/view ~(util/ns-keyword sym)
+                           (fn ~sym [] ~@view))))
 
 (defm defmode
   "Defines a UI mode. Has an associated asset definition and selection."
-  [sym & pane]
+  [sym & init]
   `(def ~sym
-     (repl.dock/pane ~(util/unique-id sym) (fn ~sym ~@pane)
-                     ~(or (:label (meta sym)) (util/label sym)))))
+     (repl.ui/mode
+      ~(util/unique-id sym)
+      ~(or (:label (meta sym)) (util/label sym))
+      (fn ~sym ~@init))))
+
+(defm defpane
+  ""
+  [sym & init]
+  `(def ~sym
+     (repl.ui/pane
+      ~(util/unique-id sym)
+      (fn ~sym ~@init))))

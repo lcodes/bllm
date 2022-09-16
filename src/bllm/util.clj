@@ -189,6 +189,11 @@
 ;;; Conditional Compilation -> Matching the different build profiles.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn cljs?
+  "Returns `true` when evaluated in a ClojureScript compilation context."
+  []
+  (some? cljs.env/*compiler*))
+
 (defn dev? []
   true) ; TODO
 
@@ -227,6 +232,14 @@
        [sym# & args#]
        (let [[~m-sym [~@m-args]] (macro/name-with-attributes sym# args#)]
          ~@body)))) ; Here body is assumed to expand into the final `def`.
+
+(defm defalias
+  "Defines an alias to another var, while preserving its metadata."
+  [sym ref]
+  (let [m (if (cljs?)
+            (:meta (cljs.analyzer/resolve-var &env ref))
+            (meta (resolve ref)))]
+    `(def ~(vary-meta sym merge m) ~ref)))
 
 (defm defconst
   "Better, shorter `def ^:const`. Allows the defined var to be redefined."

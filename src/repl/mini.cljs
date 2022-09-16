@@ -62,6 +62,7 @@
 
 (ui/deframe bar
   "The mini-bar is stocked with specialty beverages and snacks for visitors."
+  {:elem :footer}
   ;; TODO as hiccup? would allow passing props, not needed for now
   log-message
   background-tasks

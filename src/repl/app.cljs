@@ -2,8 +2,7 @@
   "Wires the initial user experience. The REPL is live, long live the REPL."
   (:require
    ;; 3rd-party
-   [reagent.dom   :as dom]
-   [re-frame.core :as rf]
+   [reagent.dom :as dom]
    ;; Engine
    [bllm.core :as core]
    [bllm.disp :as disp]
@@ -52,23 +51,22 @@
 
 (ui/deframe window
   "Root view of the UI component tree. Covers the full client area of `main`."
-  []
-  menu/bar
-  tool/bar
-  dock/bar
-  mini/bar)
+  [ui/node menu/bar]
+  [ui/node tool/bar]
+  [ui/node dock/bar]
+  [ui/node mini/bar])
 
 (defn mount
   "Entry point for the UI component tree. Called after figwheel loads new code."
   []
-  (dom/render [window] main))
+  (dom/render [ui/node window] main))
 
 (defn- start
   "Launch the simulation. All systems are initialized at this point."
   []
   (mount)
   (html/remove-class main "boot")
-  (html/remove-class main "rotate")
+  (html/remove-class main "init")
   (core/start)
   (demo/scene)
   (disp/frame tick))
@@ -77,7 +75,7 @@
   "Early initialization, before systems are initialized. Don't waste time here."
   []
   (halt/init)
-  (html/add-class main "rotate"))
+  (html/add-class main "init"))
 
 (defn- post-init
   "Late initialization performed while systems are initializing asynchronously."

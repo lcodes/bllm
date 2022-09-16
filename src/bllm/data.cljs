@@ -200,7 +200,7 @@
       (util/return))))
 
 (defn- open []
-  (assert (nil? conn))
+  (some-> conn .close)
   (util/defer [resolve reject]
     (let [^object req (.open js/indexedDB project version)]
       (set! (.-onupgradeneeded req) on-upgrade-needed)
@@ -253,8 +253,6 @@
 (defn pre-tick []
   (when (and conn (pos? (.-size dirty-stores)))
     ;; TODO move new requests to fresh queue, wait for existing requests to complete
-    (some-> conn .close)
-    (set! conn nil)
     (util/inc! version)
     (-> (open) (.then finish-refresh)))) ; TODO (.catch generic-error-handler)
 
