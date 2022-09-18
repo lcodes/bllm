@@ -29,7 +29,8 @@
   (reagent-render []
     [:canvas]))
 
-(ui/defpane viewport
+#_
+(ui/defview port
   {:elem Viewport}
   [state] ; associated camera views
 

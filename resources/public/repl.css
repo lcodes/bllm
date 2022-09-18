@@ -1,78 +1,32 @@
-@import "reset.css";
+@import "css/reset.css";
 
-
-/* Global Variables */
-/******************************************************************************/
-
-:root {
-  --font-code: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", "Noto Sans", "Liberation Sans", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-  --font-head: serif;
-  --font-text: cursive;
-
-  --text-light:      hsl(202, 5%, 95%);
-  --text:            hsl(202, 5%, 85%);
-  --text-dark:       hsl(202, 5%, 75%);
-  --text-muted:      hsl(202, 5%, 50%);
-
-  --bg-page:         hsl(202, 20%, 10%);
-  --bg-body:         hsl(202, 20%, 25%);
-  --bg-head:         hsl(202, 40%, 25%);
-  --bg-group:        hsl(202, 30%, 30%);
-  --bg-hover:        hsl(202, 50%, 50%);
-  --bg-active:       hsl(202, 35%, 35%);
-  --bg-separator:    rgba(0, 0, 0, .25);
-
-  --primary-muted:   hsl(265, 25%, 35%);
-  --primary-dark:    hsl(265, 75%, 15%);
-  --primary:         hsl(265, 75%, 35%);
-  --primary-light:   hsl(265, 75%, 55%);
-  --secondary-muted: hsl(202,  5%, 35%);
-  --secondary-dark:  hsl(202, 25%, 15%);
-  --secondary:       hsl(202, 25%, 35%);
-  --secondary-light: hsl(202, 25%, 55%);
-  --success-muted:   hsl(120, 35%, 35%);
-  --success-dark:    hsl(120, 75%, 15%);
-  --success:         hsl(120, 75%, 35%);
-  --success-light:   hsl(120, 75%, 55%);
-  --warning-muted:   hsl( 55, 25%, 35%);
-  --warning-dark:    hsl( 55, 75%, 15%);
-  --warning:         hsl( 55, 75%, 35%);
-  --warning-light:   hsl( 55, 75%, 55%);
-  --error-muted:     hsl(358, 25%, 35%);
-  --error-dark:      hsl(358, 75%, 15%);
-  --error:           hsl(358, 75%, 35%);
-  --error-light:     hsl(358, 75%, 55%);
-  --info-muted:      hsl(202, 25%, 35%);
-  --info-dark:       hsl(202, 75%, 15%);
-  --info:            hsl(202, 75%, 35%);
-  --info-light:      hsl(202, 75%, 55%);
-
-  --separator: solid 2px var(--bg-separator);
-}
+@import "css/vars.css";
+@import "css/rule.css";
+@import "css/layout.css";
 
 
 /* Application Window */
 /******************************************************************************/
 
-html, body, main, #frame {
+html, body, main {
   display: flex;
   flex: 1;
 }
+
 html {
   height: 100%;
 }
+
 body {
+  line-height: 1.5;
   font-size: 1rem;
   background: var(--bg-page);
   color: var(--text);
-  font-family: var(--font-body);
   overflow: hidden;
-  -webkit-user-select: none;
-  user-select: none;
 }
-#frame {
-  flex-direction: column;
+
+body, button {
+  font-family: var(--font-body);
 }
 
 
@@ -82,93 +36,27 @@ body {
 main.boot {
   align-items: center;
   justify-content: center;
-  font-size: 24rem;
+  font-size: 2rem;
+  font-weight: bold;
+  color: var(--text-dark);
 }
 
-main.init {
-  animation: rotation 2s infinite linear;
+main.boot::after {
+  content: "👁";
+  position: absolute;
+  padding-bottom: 3.1415rem;
+  font-size: 28rem;
+  opacity: 0.5;
+  z-index: -1;
 }
 
-@keyframes rotation {
-  from {
-    transform: rotate(0deg);
+@keyframes main-fade {
+  50% {
+    opacity: 1;
+    font-size: 32rem;
   }
-  to {
-    transform: rotate(359deg);
-  }
 }
 
-
-/* UI View Containers */
-/******************************************************************************/
-
-.frame {
-  display: flex;
-  background: var(--bg-body);
-  padding: 2px;
-}
-
-.flex { display: flex; }
-.grow { flex-grow: 1; }
-
-.col { flex-direction: column; }
-.row { flex-direction: row; }
-
-
-.tabs {
-  display: flex;
-  flex-grow: 1;
-}
-
-.btns {
-  display: flex;
-}
-
-
-/* Menu Views */
-/******************************************************************************/
-
-
-/* Tool View */
-/******************************************************************************/
-
-#tool {
-}
-
-
-/* Mini View */
-/******************************************************************************/
-
-#mini {
-}
-
-
-/* Dock View */
-/******************************************************************************/
-
-#dock {
-  display: grid;
-  flex: 1;
-}
-
-
-/* Pane View */
-/******************************************************************************/
-
-.pane {
-  flex: 1;
-}
-
-
-/* Mode View */
-/******************************************************************************/
-
-.mode {
-}
-
-
-/* Game View */
-/******************************************************************************/
-
-.game {
+main.init::after {
+  animation: main-fade 3.1415s infinite ease-in-out;
 }

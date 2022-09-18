@@ -36,45 +36,11 @@
 
 (ui/defview background-tasks
   []
-  [:div.background-tasks
-   [:span.icon "📝"]
-   "0"])
+  [:p.background-tasks 0 [:span.icon "📝"]])
 
 (ui/defview log-message
   []
-  [:div.grow.log-message "Hello World"])
-
-;; TODO move these actions to another module.
-(defn play-reverse [])
-(defn play|pause [])
-(defn stop [])
-(defn record [])
-(defn step-back [])
-(defn step-forward [])
-(defn goto-beginning [])
-(defn goto-end [])
-(defn pack [])
-(defn options [])
-
-(defn- engine-btn [label click]
-  [:li.icon [:button.engine-btn {:on-click click} label]])
-
-(ui/defview engine-controls
-  "What do we want? Faster horses! What is this car you speak of? What's a cdr?"
-  []
-  [:div.flex.engine-controls
-   [:ul.btns
-    [engine-btn "⏮" goto-beginning]
-    [engine-btn "⏪" step-back]
-    [engine-btn "◀" play-reverse]
-    [engine-btn "▶" play|pause] ; TODO "⏸" pause label dependent on engine state
-    [engine-btn "⏹" stop]
-    [engine-btn "⏺" record] ; TODO red when recording (also `recording-mode` as filter over UI)
-    [engine-btn "⏩" step-forward]
-    [engine-btn "⏭" goto-end]]
-   [:ul.btns
-    [engine-btn "📦" pack]
-    [engine-btn "⚙" options]]])
+  [:p.log-message "Hello World"])
 
 (ui/defview layout-select
   []
@@ -83,21 +49,21 @@
 
 (ui/defview user-button
   []
-  [:div.user-button]
-  [:div "Myself 👤"])
+  [:p "Myself 👤"])
 
 (ui/defview status-icons
   []
   ;; configure which "services" to display the status of, define notion of service
-  [:div "🖧 🔌 🔋 🔊"])
+  [:p "🖧 🔌 🔋 🔊"])
 
+;; TODO display modes; hidden, on hover, on key, disabled
 (ui/deframe bar
   "The mini-bar is stocked with specialty beverages and snacks for visitors."
-  {:elem :footer}
+  {:elem :footer :layout :row :class "bg-secondary"}
   ;; TODO grab state of system frames from filtering nodes, then sorting by priority (neg to left, pos to right)
-  [ui/node engine-controls]
-  [ui/node background-tasks]
   [ui/node log-message]
-  [ui/node layout-select]
+  ui/space
+  [ui/node background-tasks]
+  ;;[ui/node layout-select]
   [ui/node user-button]
   [ui/node status-icons])

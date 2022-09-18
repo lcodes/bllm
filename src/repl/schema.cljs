@@ -8,6 +8,12 @@
 (defmethod ui/node* :schema [n v]
   [:div "UI view describing another UI view, or itself, who knows"])
 
+(ui/defview reflect
+  []
+  [:img {:width 480 :height 360 :src "https://preview.redd.it/dys3wj2z9ue61.jpg?auto=webp&s=511078554dbb75c73fb0e791d4d1802b43db9801"}]
+  #_
+  [:div "Hello"])
+
 ;; TODO debug views?
 ;; - browse the UI layout
 ;; - browse the app-db

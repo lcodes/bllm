@@ -14,6 +14,6 @@
 ;; - table views (share with inspector? editing multiple entities same as editing content tables, ie the Scene store)
 ;;               (also similar to browser, from browsing scenes to editing their details isn't that different a view)
 
-(ui/defpane world
+(ui/defview world
   []
   [:div "ECS Scenes"])

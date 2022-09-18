@@ -3,11 +3,12 @@
   (:require [bllm.data :as data]
             [bllm.util :as util :refer [def1]]
             [repl.mode :as mode]
-            [repl.ui   :as ui]))
+            [repl.ui   :as ui]
+            [repl.home :as home]
+            [repl.schema :as schema]))
 
 (set! *warn-on-infer* true)
 
-(def1 ^:private panes (js/Map.))
 
 (comment (js/console.log panes))
 
@@ -15,20 +16,9 @@
   "A snapshot of the current positions, sizes and contents of every dock panel."
   )
 
-;; dock, containers, resize handles
-;; window layout, tabs, snapshots
-;; individual panels & their content
-
 ;; icon fonts -> fontawesome? materialicons? both? more?
 ;; - naively load all initially, then find ways to load only used icons on demand
 ;; - tower of lisp would be useful once more -> compiler should be told about this
-
-(defn pane
-  "Registers a new panel view."
-  [id view label]
-  (let [ui #js {:id id :view view :label label}]
-    (.set panes id ui)
-    ui))
 
 (defn- tab
   "."
@@ -36,8 +26,7 @@
   )
 
 (ui/defview panel
-  "A `view` container for `pane` views."
-  []
+  [state]
   ;; panel controls (close, options, ...)
   ;; tab view (optional)
   ;; - hybrid emacs/modern style -> tabs display list associated to that panel
@@ -45,12 +34,32 @@
   ;;   - regardless of the current list of tabs; adds a tab if new to this panel, dont need fancy tab mgmt, most likely end up off
   ;; content
   ;; mode line (optional)
-  [:div.panel "TODO"])
+  [:div.panel
+   [:div.head
+    [:h2 "Panel"]
+    ui/space
+    [:button ui/more-label]]
+   [:section.pane
+    (ui/pretty state)
+    [:img {:width 256 :src "https://learnopengl.com/img/textures/wall.jpg"}]]
+   [ui/node mode/line (:name state)]])
+
+(ui/deframe temp-bar
+  {:layout :row}
+  [ui/node home/welcome]
+  [ui/node schema/reflect])
 
 (ui/deframe bar
   "The main application view is a fully customizable dock."
-  {:class "grow"}
-  [ui/node panel]
+  {:class "grow" :sep ui/split}
+  ;; break down into `frame` splits, with `panel` leaves
+  ;; - splitting a panel, or emacs as a window manager in the browser:
+  ;;   - if same direction, add new panel to parent frame
+  ;;   - otherwise, add current and new panel to new frame, splice in place of existing panel
+  ;;[ui/node panel :welcome]
+  ;;[ui/node panel :welcome]
+  [ui/node temp-bar]
+  [ui/node home/summary]
   ;; dock containers
   ;; - each container is a tab view and a current pane view
   ;; - resize handles, add/remove containers as new areas are formed/emptied

@@ -58,6 +58,11 @@
   (let [info (get-in db [:assets id])]
     ))
 
+(ui/defview ui
+  "Root component of the asset database browser."
+  []
+  [:div "Browse Asset Database"])
+
 #_
 (dock/defpane ui
   {:init {:roots {}
@@ -72,3 +77,14 @@
   (folder-refresh)
   (folder-select* (ui/get-local ::selected-folder identity 0))
   (ui/emit [::file-search (ui/get-local ::file-search-q identity "")]))
+
+;; UI Nodes:
+;; - kind (view/pane/menu/etc) is purely to select the component's entry point
+;; - data is fed in, but otherwise handled outside ui/node (view-specific defevents)
+;; - a `frame` is a container for a preferred view kind (ie panels prefer panes)
+;; - but not all components make sense as panes, or views, or menus
+;;   - also dont want a frame to be ONLY panes or ONLY menus.
+;;   - menus are toolbars, the frame determine the view context (container, display opts -> through interceptors)
+;;   - which means a 3D canvas could be a menu item, oh no.
+;;   - a menu can be a panel element (toolbar between two panes)
+;;   - changing workspace changes EVERYTHING or as little as needed (modeA -> modeA+opts doesnt change much, modeA->modeB does)

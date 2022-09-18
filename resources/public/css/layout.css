@@ -1,0 +1,168 @@
+#scripts,
+#figwheel-heads-up-container,
+#figwheel-heads-up-container div {
+  display: initial;
+}
+
+div, header, nav, section, footer {
+  display: flex;
+}
+div, section {
+  flex-direction: column;
+}
+
+a {
+  text-decoration: none;
+}
+
+body, button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+p {
+  margin-bottom: 1rem;
+}
+
+.lead {
+  font-size: 1.5rem;
+  font-weight: 300;
+}
+
+p, h1, h2, h3, h4, h5, h6 {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  margin-bottom: .5rem;
+  line-height: 1.2;
+  font-weight: 500;
+}
+
+ul {
+  list-style: disc;
+  padding-left: 2rem;
+}
+
+h1 { font-size: 2.5rem; }
+h2 { font-size: 2rem; }
+h3 { font-size: 1.75rem; }
+h4 { font-size: 1.5rem; }
+h5 { font-size: 1.25rem; }
+h6 { font-size: 1rem; }
+
+.frame {
+  background: var(--bg-body);
+}
+.window {
+  background: var(--bg-page);
+}
+
+.frame > p {
+  display: flex;
+  align-items: center;
+  padding: .125rem .25rem;
+  margin: 0;
+}
+
+.frame.col > *:not(:first-child) {
+  margin-top: 1px;
+}
+.frame.row > *:not(:first-child) {
+  margin-left: 1px;
+}
+
+.panel, .pane {
+  flex-grow: 1;
+  flex-direction: column;
+}
+
+.btns, .tabs {
+  list-style: none;
+  padding-left: 0;
+}
+
+.tabs, .tabs > li {
+  display: flex;
+}
+.tabs > li > a {
+  display: block;
+  padding: .125rem .75rem;
+  color: var(--text);
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.tabs > li > a:hover {
+  color: var(--text-light);
+  background-color: var(--bg-hover);
+}
+
+.tabs > .active > a {
+  color: var(--text-dark);
+  background-color: var(--bg-head);
+}
+
+.btns {
+  display: flex;
+}
+
+button {
+  line-height: 1.5;
+  border: 0 none;
+  padding: .375rem .75rem;
+}
+button.close {
+  background: transparent;
+  border-radius: 9999px;
+  padding: 2px 4px;
+  margin: 0 -.75rem 0 .175rem;
+  font-size: 0.65rem;
+  color: var(--text-dark);
+}
+button.close:hover {
+  background: var(--error);
+}
+
+.btn-group {
+  flex-direction: row;
+}
+.btn-group > button:first-child {
+  border-top-left-radius: 4px;
+  border-bottom-left-radius: 4px;
+}
+.btn-group > button:last-child {
+  border-top-right-radius: 4px;
+  border-bottom-right-radius: 4px;
+}
+.btn-group > button:not(:first-child) {
+  border-left: 1px solid var(--text-dark);
+}
+
+h1.title {
+  display: flex;
+  align-items: center;
+  padding: .375rem .75rem;
+  font-size: 1.25rem;
+  font-weight: bold;
+  line-height: 1;
+  margin-bottom: 0;
+  color: var(--text-light);
+}
+
+.system button {
+  color: var(--text);
+  background: transparent;
+}
+.system button:hover {
+  color: var(--text-light);
+  background: var(--bg-hover);
+}
+.system button.quit:hover {
+  background: var(--error-light);
+}
+
+.content {
+  padding: 1rem;
+}

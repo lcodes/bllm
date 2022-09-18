@@ -14,8 +14,8 @@
 
 ;; ...
 
-(ui/defpane selection
+(ui/defview selection
   "Displays a live preview of the current user selection."
   {:label "Preview"}
   []
-  [:div "Hello warld"])
+  [:div "Hello world"])

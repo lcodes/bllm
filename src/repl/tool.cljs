@@ -31,22 +31,71 @@
 ;; - not limited to text as a context; everything is data with the means to understand it at hand
 
 (ui/defview context
+  []
   ;; similar to browser's address bar, but to select the current ECS scene instead of HTML document
   ;; - easily pull external scenes, get deeplink to share current scene, bookmark, etc
-  )
+  [:div "CONTEXT HELP?"])
 
 (ui/defview bookmark
+  []
   ;; favorite deeplinks, from changing ECS scenes to dock panel views
-  )
+  [:div "FAVORITES"])
 
-(ui/defview buttons
-  ;; displays a collection of buttons (text, icon or both) mapped to commands
-  ;; TODO allow multiple instances of this (different button bars for different features)
-  )
+(ui/defview mem-stats
+  []
+  [:div "MEM"])
+
+(ui/defview cpu-stats
+  []
+  [:div "CPU"])
+
+(ui/defview gpu-stats
+  []
+  [:div "GPU"])
+
+;; TODO move these actions to another module.
+(defn play-reverse [])
+(defn play|pause [])
+(defn stop [])
+(defn record [])
+(defn step-back [])
+(defn step-forward [])
+(defn goto-beginning [])
+(defn goto-end [])
+(defn pack [])
+(defn options [])
+
+(defn- btn [label click]
+  [:li.icon [:button.tool-btn {:on-click click} label]])
+
+(ui/defview engine-btns
+  "What do we want? Faster horses! What is this car you speak of? What's a cdr?"
+  []
+  [:div.buttons
+   [:ul.btns
+    [btn "⏮" goto-beginning]
+    [btn "⏪" step-back]
+    [btn "◀" play-reverse]
+    [btn "▶" play|pause] ; TODO "⏸" pause label dependent on engine state
+    [btn "⏹" stop]
+    [btn "⏺" record] ; TODO red when recording (also `recording-mode` as filter over UI)
+    [btn "⏩" step-forward]
+    [btn "⏭" goto-end]]])
+
+(ui/defview editor-btns
+  []
+  [:ul.btns
+   [btn "📦" pack]
+   [btn "⚙" options]])
 
 (ui/deframe bar
-  {:elem :nav}
-  [ui/node context]
+  {:elem :nav :layout :row :class "bg-secondary"}
   [ui/node bookmark]
-  [ui/node buttons]
-  )
+  [ui/node context]
+  ui/space
+  [ui/node engine-btns]
+  [ui/node editor-btns]
+  ui/space
+  [ui/node mem-stats]
+  [ui/node cpu-stats]
+  [ui/node gpu-stats])

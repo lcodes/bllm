@@ -12,7 +12,7 @@
 (defn- label []
   "Inspect") ; TODO customize label to reflect selection
 
-(ui/defpane selection
+(ui/defview selection
   {:label label} ; TODO
   []
   [:div "Inspect Hello"])
