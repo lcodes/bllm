@@ -166,3 +166,14 @@ h1.title {
 .content {
   padding: 1rem;
 }
+
+.drop {
+  background: rgba(255, 255, 255, .25);
+  padding: 1rem;
+}
+.drop > div {
+  padding: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: dashed 4px var(--text);
+}

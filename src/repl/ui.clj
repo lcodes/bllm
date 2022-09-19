@@ -2,8 +2,12 @@
   (:require [bllm.util :as util :refer [defm]]
             [clojure.string :as str]))
 
-(defn- emit-event [reg sym params handler]
-  (let [a (gensym "args")
+(def not-vector? (complement vector?))
+
+(defn- emit-event [reg sym args]
+  (let [interceptors       (take-while not-vector? args)
+        [params & handler] (drop-while not-vector? args)
+        a (gensym "args")
         f (if (and (symbol? params) (empty? handler))
             params
             (let [[node & args] params]
@@ -12,23 +16,26 @@
                     `(do ~@handler)
                     `(let [[_# ~@args] ~a]
                        ~@handler)))))]
-    `(do (def ~sym ~(keyword (str *ns*) (str/replace (name sym) #"^on-" "")))
-         ~(if-let [w (:with (meta sym))]
+    `(do (def ~sym ~(keyword (str *ns*) (str/replace (name sym) #"^(?:handle|on)-" "")))
+         ~(if-let [w (or (:with (meta sym))
+                         (when (not-empty interceptors)
+                           (vec interceptors)))] ; TODO warn if using both
             `(~reg ~sym ~w ~f)
             `(~reg ~sym ~f))
          ~sym)))
 
-(defm defevent
-  [sym params & handler]
-  (emit-event 're-frame.core/reg-event-db sym params handler))
+(defm ^:private defevent*
+  [sym reg]
+  `(defm ~sym
+     {:args '[interceptors* params & handler]}
+     [sym# & args#]
+     (emit-event '~reg sym# args#)))
 
-(defm defeffect
-  [sym params & handler]
-  (emit-event 're-frame.core/reg-event-fx sym params handler))
+(defevent* defevent re-frame.core/reg-event-db)
 
-(defm defhandler
-  [sym params & handler]
-  (emit-event 're-frame.core/reg-event-ctx sym params handler))
+(defevent* defeffect re-frame.core/reg-event-fx)
+
+(defevent* defhandler re-frame.core/reg-event-ctx)
 
 (defn- sub [sym]
   (symbol (str sym "-sub")))

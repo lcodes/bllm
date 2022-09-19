@@ -102,6 +102,17 @@
   bytes)
 
 
+;;; Statically Typed Dynamic Memory
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn array-copy [dst src]
+  (util/doarray [x i src]
+    (aset dst i x)))
+
+(defn ^js/Uint32Array bit-array [size]
+  (-> size (+ 31) (/ 32) js/Math.floor js/Uint32Array.))
+
+
 ;;; Micro Logger
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

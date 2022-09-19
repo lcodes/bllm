@@ -29,18 +29,52 @@
 ;;   - common patterns in data extraction also emit schemas and initializers.
 ;;   - as convenience, of course, all UI macros just expand the scaffoldings.
 
+(util/defalias ! rf/dispatch)
 (util/defalias $ rf/subscribe)
 
-(util/defconst extraction-sub-key ::db)
-(util/defconst extraction-get-key ::get)
+(defn !>
+  ([k a]
+   (! (vector k a)))
+  ([k a b]
+   (! (vector k a b)))
+  ([k a b c]
+   (! (vector k a b c)))
+  ([k a b c d]
+   (! (vector k a b c d))))
+
+(defn !event
+  ([k]
+   (let [ev [k]]
+     (fn dispatch [e]
+       (! ev)
+       (util/prevent-default e))))
+  ([k f]
+   (fn dispatch [e]
+     (! [k (f e)])
+     (util/prevent-default e))))
+
+(util/defalias cofx rf/inject-cofx)
+
+(util/defconst db-key  ::db)
+(util/defconst get-key ::get)
+(util/defconst sub-key ::sub)
+
+(rf/reg-cofx
+ sub-key
+ (fn $cofx [cofx [k sub]]
+   (assoc cofx k @sub)))
+
+(defn $cofx [k sub]
+  (-> (cofx sub-key [k sub])
+      (assoc :id k)))
 
 (rf/reg-sub
- extraction-sub-key
+ db-key
  ;; `parent-sub` is `re-frame.db/app-db` implicitly.
  (fn $db [db [_ k]]
    (get db k)))
 
-(defn- $db
+(defn $db
   "Specialized subscription to extract top-level data from the app-db.
 
   Doesn't look inside the data, doesn't support nested lookups. By design.
@@ -51,16 +85,16 @@
 
   NOTE automatically used by `defschema` to extract its defined UI state."
   [k]
-  ($ (vector extraction-sub-key k)))
+  ($ (vector db-key k)))
 
 (rf/reg-sub
- extraction-get-key
+ get-key
  (fn $get-q [[_ _ parent-sub]]
    parent-sub)
  (fn $get [m [_ k]]
    (get m k)))
 
-(defn- $get
+(defn $get
   "Subscription extracting the requested key from the given stream of maps.
 
   Doesn't look inside the data, doesn't support nested lookups. By design.
@@ -68,7 +102,7 @@
   Primarily used to extract individual elements from Layer 2 or 3 subscriptions,
   to be transformed in materialized views or consumed in user interface views."
   [from k]
-  ($ (vector extraction-get-key k from)))
+  ($ (vector get-key k from)))
 
 (declare state)
 (declare nodes)
@@ -322,8 +356,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn init [app-container]
-  ;; hook input events
-
   ;; pull initial state from sessionStorage, localStorage and IndexedDB?
   )
 

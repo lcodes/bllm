@@ -10,13 +10,13 @@
    [bllm.html :as html]
    [bllm.util :as util :refer [def1]]
    ;; Application
+   [repl.cmd  :as cmd]
    [repl.dock :as dock]
    [repl.demo :as demo]
    [repl.halt :as halt]
    [repl.game :as game]
    [repl.menu :as menu]
    [repl.mini :as mini]
-   [repl.nav  :as nav]
    [repl.tool :as tool]
    [repl.ui   :as ui]
    ;; Engine Plugins
@@ -32,7 +32,7 @@
 (set! *warn-on-infer* true)
 
 (def1 ^:private ^js/HTMLElement main
-  "Application container element. Defined in index.html."
+  "Application container element. Defined in resources/public/index.html."
   (js/document.querySelector "main"))
 
 (defn- tick
@@ -81,13 +81,13 @@
 (defn- post-init
   "Late initialization performed while systems are initializing asynchronously."
   []
+  (cmd/init)
   (ui/init main)
-  (nav/init)
   (let [noscript (js/document.querySelector "noscript")]
     (.removeChild (html/parent noscript) noscript)))
 
 (defn init
-  "Completely initializes all of the engine and application systems."
+  "Completely initializes all of the engine & editor systems and their plugins."
   [custom-init]
   (pre-init)
   (let [engine (core/init)]
