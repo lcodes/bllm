@@ -1,5 +1,14 @@
 (ns repl.ui
-  "User Interface controls for views with models. Simplified use of `re-frame`."
+  "User Interface controls for views with models. Opinionated use of `re-frame`.
+
+  `repl` -> Emacs! :: Inspired a lot from emacs, then expanding a bit, or a lot.
+  --------------
+  `dock` -> TILING :: Complete UI is made from `frame` layouts or `panel` views.
+  `pane` -> WINDOW :: A view used to quickly switch between multiple user views.
+  `view` -> BUFFER :: UI view function over the corresponding information model.
+  `mode` ->  MODE  :: Interactive functionality instantiated in a model context.
+  `data` -> OBJECT :: Any object whose type has an associated metadata protocol.
+  `time` -> STREAM :: First-class timelines as the foundation of task execution."
   (:require-macros [repl.ui])
   (:require [reagent.core  :as rc]
             [re-frame.core :as rf]
@@ -8,18 +17,14 @@
 
 (set! *warn-on-infer* true)
 
-;; TODO local/session storage as state store
-;; - indexeddb is async, this triggers a lot more and is sync optimized for small data
-;; - only tradeoff is having to do the JSON serialization
-;; - BUT, can debounce all writes to batches (well then, whats different from async IDB?)
-;;   - more to amortize JSON serialization cost when user preferences are iterated on
-;;   - all late game implementations, but useful to hook ahead of time in the design
-
 
 ;;; Application Schema - Make re-frame even more declarative than it already is.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; https://day8.github.io/re-frame/subscriptions/
+
+;; full app has a model, making global modes possible, or global defaults
+;; - more emacs features emerging back from the design, neat!
 
 ;; Don't forget:
 ;; - reading and writing to the app-db are *completely* decoupled, by design.
@@ -148,19 +153,11 @@
   panes {} ; "Instanced components (view ID -> view state)"
   views {} ; "Singleton components (viewkey -> view state)"
   nodes {} ;
-  prefs {} ; "Configurable user options (opt key -> value)"
+  prefs {} ; "Configurable user options (opt key -> value)" ;; TODO schema here, values in `repl.state` -> decouple update frequency
   ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
   )
 
 (comment @($get nodes-sub state))
-
-#_(repl.ui/defcofx local
-  []
-  )
-
-#_(repl.ui/defx local!
-  [_event k v]
-  )
 
 #_(repl.ui/defeffect set-pref
   {:args false}
@@ -218,14 +215,18 @@
 
 (defmulti node*
   "Every method implements a unique kind of managed view, see also `node`."
-  (fn node-dispatch [n v]
+  (fn node-dispatch [n k v]
     (:kind n)))
 
-(defmethod node* :default [{:as node :keys [kind]} data]
+(defn- key-view [k]
+  [:p.lead "View Key: " (str k)])
+
+(defmethod node* :default [{:as node :keys [kind]} view-key data]
   [:div.error
    [:h3 (cond (nil? node) "Missing node"
               (nil? kind) "Invalid node"
               :else       "Missing kind")]
+   (key-view view-key)
    [:pre (cljs.pprint/pprint node)]
    [:pre (cljs.pprint/pprint data)]])
 
@@ -236,7 +237,7 @@
   ([node-k view-k] ; Instanced view
    (let [n @($get nodes-sub node-k)
          v @($get views-sub view-k)]
-     (node* n v))))
+     [error-boundary (node* n view-k v)]))) ; TODO optional error-boundary
 
 (def space "Reusable spacer view component." [:div.space.grow])
 
@@ -261,19 +262,19 @@
              :transient? transient?
              :views initial-views}))
 
-(defmethod node* :frame [{:keys [elem class layout views]} state]
+(defmethod node* :frame [{:keys [elem class layout views]} view-key state]
   `[~elem {:class ~(html/class "frame" (name layout) class)}
     ~@(or state views)]) ; TODO use `views` when creating the frame state, should never be nil here
 
 (defn view
-  [k hiccup]
+  [k v]
   ;; view hash, label, view function, context flags, preferred container
   ;; flags include singleton, system, pane etc
-  (register {:kind :view :name k :view hiccup}))
+  (register {:kind :view :name k :view v}))
 
-(defmethod node* :view [{:keys [view]} v]
+(defmethod node* :view [{:keys [view]} view-key v]
   ;; view options (ID/class, managed hooks)
-  (view v))
+  (view view-key v))
 
 
 ;;; Modal Panes - Managed views with associated selection data and editor modes.
@@ -290,7 +291,11 @@
   ;; GOOD -> UI shaders is the next logical step
   (register {:kind :pane :name k :base base :view view}))
 
-(defmethod node* :pane [n v]
+(def ^:dynamic *panel*
+  "The UI panel a view is being rendered in."
+  nil)
+
+(defmethod node* :pane [n k v]
   ;; TODO what really makes pane different from view here?
   ;; - decorations & modeline handled by `dock/panel`
   ;; - anything else is view specific, and composes from there (ie text editor isnt texture viewer isnt material editor isnt shader graph)
@@ -348,7 +353,7 @@
   [k init]
   k) ; TODO
 
-(defmethod node* :menu [n v]
+(defmethod node* :menu [n k v]
   [:ul.menu "MENU"])
 
 
@@ -363,7 +368,32 @@
 ;;; Misc. Components & Labels
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; https://www.compart.com/en/unicode/block/U+1F300
+(repl.ui/defview sample-view
+  "Used to debug `node` dispatch."
+  [view me]
+  [:div.sample.content
+   [:h2 "Sample View"]
+   [:div.row.grow
+    [:div.grow
+     (key-view view)
+     (pretty me)]
+    [:div.grow
+     [node nil]
+     [node :--invalid--]]]])
+
+;; TODO this grew a bit wildly while listening to a podcast, move to another module, find way to extract meta
+;; - could also dump all of unicode into IDB and load by name or codepoint, ie `:unicode/fleur-de-lis`
+;; - how big is that store? no good if user ends up with one copy per domain hosting this, db isnt for "builtin" data
+;; - remote is a fuckton of queries, even with batches, death by a thousand cuts on the server side to scale this
+;; - character info is minimal in browser, embedding a table is still large, and doesn't have character names
+;;
+;; could work like UI fonts -> specify codepoint ranges to include, and import only these
+;; - only need full information for display labels
+;; - in any case, builtin asciitable/unicodetable would be neat (long term, bored time)
+;;   - hex view better to do short term, lots of buffers to inspect soon
+;;   - got the meta too, can select a binary view and project it to a type
+;;     - got the UI too, can dispatch to allow interactive/media views, not just text
+
 (def quebec "Made in" "⚜")
 
 (def more-label "…")
@@ -377,40 +407,327 @@
 (def bullet-dot "•")
 (def middle-dot "·")
 
-(def arrow-circle-cw "↻")
-(def arrow-circle-ccw "↺")
-
 (def check-label "✔")
 (def cross-label "✘")
+
+(def cross-mark "❌")
+(def ?-0 "❔")
+(def ?-1 "❓")
+(def !-0 "❕")
+(def !-1 "❗")
+
+(def ?obj "￼")
+(def ???? "�")
 
 (def time-label "⏳")
 (def clock-label "⏰")
 
+(def pick "⛏")
+(def curl-1 "➰")
+(def curl-2 "➿")
+(def undo-label "⎌")
 (def edit-label "✍")
 (def cut-label "✂")
 
+(def ribbon "🎀")
+(def drink "🍹")
+(def cocktail "🍸")
+(def wine "🍷")
+(def sake "🍶")
+(def tea "🍵")
+(def beer "🍺")
+(def beers "🍻")
+(def dinner "🍽")
+(def bottle "🍾")
+(def popcorn "🍿")
+(def present "🎁")
+(def cake "🎂")
+(def urn "🏺")
+(def fishing "🎣")
+(def coaster "🎢")
+(def ferris "🎡")
+(def carousel "🎠")
+(def cinema "🎦")
+(def camera "🎥")
+(def keyboard-jack "🎘")
+(def level-slider "🎚")
+(def control-knob "🎛")
+(def studio-mic "🎙")
+(def microphone "🎤")
+(def headphone "🎧")
+(def palette "🎨")
+(def top-hat "🎩")
+(def circus "🎪")
+(def slots "🎰")
+(def movie "🎬")
+(def billards "🎱")
+(def game-die "🎲")
+(def bowling "🎳")
+(def acting "🎭")
+(def gamepad "🎮")
+(def target "🎯")
+(def ticket "🎫")
+(def tickets "🎟")
+(def frames "🎞")
+(def historic "⛬")
+(def church "⛪")
+(def castle "⛫")
+(def chains "⛓")
+(def anchor "⚓")
+(def tea-hot "☕")
+(def rain "⛆")
+(def fuel "⛽")
+(def tape "✇")
+(def rainbow "🌈")
+(def foggy "🌁")
+(def sunrise-0 "🌄")
+(def sunrise-1 "🌅")
+(def dusk "🌆")
+(def sunset "🌇")
+(def stars "🌃")
+(def night "🌉")
+(def sailboat "⛵")
+(def fountain "⛲")
+(def umbrella-0 "🌂")
+(def umbrella-1 "☔")
+(def snowman-0 "☃")
+(def snowman-1 "⛇")
+(def airplane "✈")
+(def shamrock "☘")
+(def helm-label "⎈")
+(def enter-label "⎆")
+(def clear-label "⎚")
+(def print-label "⎙")
+(def prev-page-label "⎗")
+(def next-page-label "⎘")
+
+(def wave "🌊")
+(def volcano "🌋")
+(def cyclone "🌀")
+(def milky-way "🌌")
+
+(def earth-grid "🌐")
+(def earth #js ["🌍" "🌎" "🌏"])
+(def moon #js ["🌑" "🌒" "🌓" "🌔" "🌕" "🌖" "🌗" "🌘"])
+
+(def moon-face-0 "🌚")
+(def moon-face-1 "🌝")
+(def moon-crescent "🌙")
+(def moon-l "🌜")
+(def moon-r "🌛")
+(def sun-face "🌞")
+(def star-glow "🌟")
+(def star-sm-0 "⭒")
+(def star-sm-1 "⭑")
+(def star "⭐")
 (def star-0 "☆")
 (def star-1 "★")
 (def heart-0 "♡")
 (def heart-1 "❤")
+(def rosette-0 "🏵")
+(def rosette-1 "🏶")
 
+(def light "💡")
+(def bomb "💣")
+(def sleep "💤")
+(def collision "💥")
+(def sweat "💦")
+(def droplet "💧")
+(def dash "💨")
+(def poo "💩")
+(def flex "💪")
+(def dizzy "💫")
+(def speech "💬")
+(def thought "💭")
+(def flower "💮")
+(def hundred "💯")
+(def money "💰")
+(def currency "💱")
+(def dollar "💲")
+(def credit "💳")
+(def yen-note "💴")
+(def dollar-note "💵")
+(def euro-note "💶")
+(def pound-note "💷")
+(def money-wings "💸")
+(def seat "💺")
+(def computer "💻")
+(def briefcase "💼")
+(def minidisc "💽")
+(def floppy "💾")
+(def cd "💿")
+(def dvd "📀")
+
+(def folder-0 "📁")
+(def folder-1 "📂")
+(def page-curl "📃")
+(def page "📄")
+(def calendar-0 "📅")
+(def calendar-1 "📆")
+(def card-index "📇")
+(def chart-0 "📈")
+(def chart-1 "📉")
+(def chart "📊")
+(def clipboard "📋")
+(def pushpin-0 "📌")
+(def pushpin-1 "📍")
+(def paperclip "📎")
+(def ruler "📏")
+(def rulers "📐")
+(def tabs "📑")
+(def ledger "📒")
+(def notebook-0 "📓")
+(def notebook-1 "📔")
+(def book-0 "📕")
+(def book-1 "📖")
+(def books "📚")
+(def name-badge "📛")
+(def scroll "📜")
+(def memo "📝")
+(def receiver "📞")
+(def pager "📟")
+(def fax "📠")
+(def antenna "📡")
+(def loudspeaker "📢")
+(def megaphone "📣")
+(def outbox "📤")
+(def inbox "📥")
+(def package "📦")
+(def email "📧")
+(def envelope-in "📨")
+(def envelope-down "📩")
+(def mailbox-lowered-0 "📪")
+(def mailbox-lowered-1 "📬")
+(def mailbox-raised-0 "📫")
+(def mailbox-raised-1 "📭")
+(def postbox "📮")
+(def postal-horn "📯")
+(def newspaper "📰")
+(def mobile "📱")
+(def mobile-> "📲")
+(def mobile= "📳")
+(def mobile-off "📴")
+(def mobile-no "📵")
+(def antenna-bars "📶")
+(def photo-camera "📷")
+(def flash-camera "📸")
+(def video-camera "📹")
+(def television "📺")
+(def radio "📻")
+(def stereo "📾")
+(def videocasette "📼")
+(def projector "📽")
+(def beads "📿")
+(def bright-0 "🔅")
+(def bright-1 "🔆")
+(def speaker- "🔇")
+(def speaker-0 "🔈")
+(def speaker-1 "🔉")
+(def speaker-2 "🔊")
+(def battery "🔋")
+(def plug "🔌")
+(def glass<- "🔍")
+(def glass-> "🔎")
+(def lock-0 "🔒")
+(def lock-1 "🔓")
+(def bell "🔔")
+(def bookmark "🔖")
+(def link "🔗")
+(def radio-btn "🔘")
+;; TODO U+1F525 need better way to get icons here
+
+(def nope-label "⛔")
+(def info-label "⚡")
 (def warn-label "⚠")
 (def debug-label "☣")
 (def error-label "☢")
 (def fatal-label "☠")
+(def label-label "🏷")
 
-(def binary-0 "⚬")
-(def binary-1 "⚭")
-(def binary-2 "⚮")
-(def binary-3 "⚯")
+(def arrow-circle-cw "↻")
+(def arrow-circle-ccw "↺")
+(def dotted-circle "◌")
+(def sun-rays "☀")
+(def snowflake "❄")
+(def comet "☄")
+(def pentagram "⛤")
+(def reload-label "⟳")
+(def gear "⛭")
+(def gear- "⛮")
+
+(def spinners
+  #js [arrow-circle-cw
+       dotted-circle
+       historic
+       sun-rays
+       pentagram
+       gear
+       gear-
+       nope-label
+       debug-label
+       error-label
+       tape
+       snowflake
+       "⛶" "⛚"
+       "✻" "✼" "✽" "✾" "✿" "❀" "❁" "❂" "❃" ""])
 
 (def dice #js ["⚀" "⚁" "⚂" "⚃" "⚄" "⚅"])
 
-(def hex "" #js ["⚊" "⚋" "⚌" "⚍" "⚎" "⚏"])
-(def hexa "☯" #js ["☰" "☱" "☲" "☳" "☴" "☵" "☶" "☷"])
+(def pulsar #js ["⚬" "⚭" "⚮" "⚯"])
+
+(def square-0 "□")
+(def square-1 "⬛")
+
+(def bin-0 #js ["⚆" "⚇"])
+(def bin-1 #js ["⚈" "⚉"])
+
+(def unit "☯" "𝌀")
+(def dual "☯" #js ["⚊" "⚋"])
+(def di-2 "☯" #js ["⚌" "⚍" "⚎" "⚏"])
+(def di-3 "☯" #js ["𝌁" "𝌂" "𝌃" "𝌄" "𝌅"])
+(def tri "☯"
+  #js ["☰" "☱" "☲" "☳"
+       "☴" "☵" "☶" "☷"])
+
+(def hexa "☯"
+  #js ["䷀" "䷁" "䷂" "䷃" "䷄" "䷅" "䷆" "䷇"
+       "䷈" "䷉" "䷊" "䷋" "䷌" "䷍" "䷎" "䷏"
+       "䷐" "䷑" "䷒" "䷓" "䷔" "䷕" "䷖" "䷗"
+       "䷘" "䷙" "䷚" "䷛" "䷜" "䷝" "䷞" "䷟"
+       "䷠" "䷡" "䷢" "䷣" "䷤" "䷥" "䷦" "䷧"
+       "䷨" "䷩" "䷪" "䷫" "䷬" "䷭" "䷮" "䷯"
+       "䷰" "䷱" "䷲" "䷳" "䷴" "䷵" "䷶" "䷷"
+       "䷸" "䷹" "䷺" "䷻" "䷼" "䷽" "䷾" "䷿"])
+
+(def tetra "☯"
+  #js ["𝌆" "𝌇" "𝌈" "𝌉" "𝌊" "𝌋" "𝌌" "𝌍" "𝌎"
+       "𝌏" "𝌐" "𝌑" "𝌒" "𝌓" "𝌔" "𝌕" "𝌖" "𝌗"
+       "𝌘" "𝌙" "𝌚" "𝌛" "𝌜" "𝌝" "𝌞" "𝌟" "𝌠"
+       "𝌡" "𝌢" "𝌣" "𝌤" "𝌥" "𝌦" "𝌧" "𝌨" "𝌩"
+       "𝌪" "𝌫" "𝌬" "𝌭" "𝌮" "𝌯" "𝌰" "𝌱" "𝌲"
+       "𝌳" "𝌴" "𝌵" "𝌶" "𝌷" "𝌸" "𝌹" "𝌺" "𝌻"
+       "𝌼" "𝌽" "𝌾" "𝌿" "𝍀" "𝍁" "𝍂" "𝍃" "𝍄"
+       "𝍅" "𝍆" "𝍇" "𝍈" "𝍉" "𝍊" "𝍋" "𝍋" "𝍍"
+       "𝍎" "𝍏" "𝍐" "𝍑" "𝍒" "𝍓" "𝍓" "𝍕" "𝍖"])
+
+;; TODO U+1F000 mahjong
+;;      U+1F030 domino
+;;      U+1F0A0 playing cards
+;;      U+1F32D food
+;;      U+1F400 animals
+;;      shove it all into meta, macros to define ranges
+;;      -> assoc with scales, ranges, numbers, colors, shapes -> list "bullet" styles, animations, countdowns, etc
+;;      -> simplify exploration of different topics by having various "alphabets" to enumerate and decorate symbols
+;;      -> create card games or change books in UI views, roll dices -> live coded collaborative decentralized D&D
 
 (def roman
   #js ["Ⅰ" "Ⅱ" "Ⅲ" "Ⅳ" "Ⅴ" "Ⅵ" "Ⅶ" "Ⅷ" "Ⅸ" "Ⅹ" "Ⅹ" "Ⅻ"])
+
+(def ansi
+  #js ["␀" "␁" "␂" "␃" "␄" "␅" "␆" "␇" "␈" "␉" "␊" "␋"
+       "␌" "␍" "␎" "␏" "␐" "␑" "␒" "␒" "␓" "␔" "␕" "␖"
+       "␗" "␘" "␙" "␚" "␛" "␜" "␝" "␞" "␟" "␠" "␠" "␢"
+       "␣" "␤" "␥" "␦"])
 
 (defn btn
   ([label click]
@@ -418,5 +735,5 @@
   ([label class click]
    [:button {:class class :on-click click} label]))
 
-(defn close-btn [click]
-  (btn close-label "close" click))
+(def close-btn  (partial btn close-label  "close"))
+(def reload-btn (partial btn reload-label "reload"))

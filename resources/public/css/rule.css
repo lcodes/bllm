@@ -7,3 +7,5 @@
 
 
 .align-center { align-items: center; }
+
+.scroll { overflow-y: scroll; }

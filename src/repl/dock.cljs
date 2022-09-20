@@ -47,7 +47,7 @@
 (ui/deframe temp-bar
   {:layout :row}
   [ui/node home/welcome]
-  [ui/node schema/reflect])
+  [schema/view ui/nodes-sub])
 
 (ui/deframe bar
   "The main application view is a fully customizable dock."
@@ -60,6 +60,7 @@
   ;;[ui/node panel :welcome]
   [ui/node temp-bar]
   [ui/node home/summary]
+  [ui/node ui/sample-view]
   ;; dock containers
   ;; - each container is a tab view and a current pane view
   ;; - resize handles, add/remove containers as new areas are formed/emptied
@@ -70,3 +71,11 @@
 ;; - split panel (vertical/horizontal), delete, resize, move panels
 ;; - nav (change which pane has focus -> direct jump, cycle through, etc)
 ;; - change active pane (with per panel history)
+
+;; deframe -> DECIDE IF INSTANCED/SINGLETON THERE
+;; -> only one of menu/tool/dock/mini, and one window
+;; -> but multiple dock splitter frames
+;; - all are the same thing (frame -> layout -> items)
+;; EXCEPT
+;; - singleton is toggled on/off globally, as a user preference (toggle independently of view state)
+;; - instance is created/destroyed on user demand, usually by splitting or merging dock panels

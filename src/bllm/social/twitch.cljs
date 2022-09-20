@@ -9,7 +9,7 @@
 
 (set! *warn-on-infer* true)
 
-;; TODO separate modules for FFZ and BLLM support -> supporter badges, mod badges, variable-size emotes
+;; TODO separate modules for FFZ and BTTV support -> supporter badges, mod badges, variable-size emotes
 
 ;; TODO persist known users, badges & emotes -> saves API & CDN roundtrips -> LRU cache with max life?
 ;; - original files caching handled by browser already, at HTTP layer; API responses will not, 2darray saves tons of requests

@@ -60,7 +60,7 @@
 
 (ui/defview ui
   "Root component of the asset database browser."
-  []
+  [view state]
   [:div "Browse Asset Database"])
 
 #_

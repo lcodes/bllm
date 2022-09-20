@@ -7,13 +7,31 @@
 
 (set! *warn-on-infer* true)
 
-;; HTML5 history -> entry point to app state deeplinks
+;; histories -> all pretty much the same thing, can `undo-tree` them all?
+;; - undo history
+;; - browse history
+;; - terminal history
+;; - command history
+;; - panel nav history
+;; - HTML5 history
+
+
+;; popstate idea -> 16mib per state, more than enough to serialize the full (or most of) the UI's db
+;; - very few pushstate events, therefore few needs for popstate as well (capture mouse nav too -> direct to panel nav instead)
+;; - URL is really "deeplink the entire dock" -> change when changing dock tabs!
+
+;; entry point to app state deeplinks
 ;; - many views, each with their own nav history (like emacs windows in a frame)
 ;; - deeplinks will need to specify layout AND panes AND deeplink within each pane
 ;; - cmd to move that state to URL or copy to clipboard -> paste in another tab, browser, platform, by another user
 ;; - dont get megabytes of URL either; if the remote doesnt already know the referenced IDs, ignore those elements
 ;;   - (or provide source to query them; WebRTC connection & have the remote request the very data we referenced)
 ;;   - kinda like graphql, but better, without text, on top of an existing schema, protocol and database; datalog inspired
+;;
+;; OR, just resolve deeplinks to an asset or a pane, and either create or show it in a panel.
+;; - one app DB convenient now, can deelink *everything*, send someone a link to focus the arcane command sequence you're talking about
+;; - no different than sharing WoW item links in chat, or twitch/FFZ/BTTV emotes, or github commits in issues, everything is relative
+
 
 (def1 ^:private lookup (rc/atom {}))
 
@@ -62,22 +80,20 @@
   stack ()
   binds {})
 
-(def stack-cofx (ui/$cofx stack stack-sub))
-
 (ui/defeffect on-key
-  stack-cofx
-  [{:as cofx :keys [db]} k]
-  ;; get current input state -> leader lookup context
-  ;; - either moving to a new leader context
-  ;; - or executing a command
-  (js/console.log k (stack cofx))
-  {})
+  [{:keys [db]} k]
+  (let [input (get-in db [state stack])]
+
+    ;; - either moving to a new leader context
+    ;; - or executing a command
+    {}))
 
 (defn- on-pop-state [e]
   (util/prevent-default e))
 
 (defn init []
   (js/addEventListener "popstate" (util/callback on-pop-state))
+  #_
   (doto ^object (.-body js/document)
     (.addEventListener "keydown" (ui/!event on-key identity))))
 
@@ -124,12 +140,12 @@
     )
 
   ;; shorthand commands with curried prefix argument
-  (defcmd split-row leader W / (split :row))
-  (defcmd split-col leader W - (split :col))
+  (defcmd split-row :- W / (split :row))
+  (defcmd split-col :- W - (split :col))
 
   (defcmd destroy
     "Closes the active panel window"
-    leader W D
+    :- W D
     []
     )
 

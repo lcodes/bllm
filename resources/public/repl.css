@@ -60,3 +60,49 @@ main.boot::after {
 main.init::after {
   animation: main-fade 3.1415s infinite ease-in-out;
 }
+
+.reflect table {
+  position: relative;
+}
+.reflect td {
+  padding: 0.15rem 0.5rem;
+}
+
+.reflect *::before,
+.reflect *::after {
+  color: var(--text-muted);
+}
+
+.reflect .ident.keyword::before {
+  content: ":";
+}
+.reflect .ident .ns + .name::before {
+  content: "/";
+}
+
+.reflect .map:empty::before {
+  content: "{}";
+}
+
+.reflect .map > tr:first-of-type > td:first-of-type::before {
+  content: "{";
+  position: absolute;
+  margin-left: -0.5rem;
+}
+.reflect .map > tr:last-of-type > td:last-of-type::after {
+  content: "}";
+  position: absolute;
+  margin-top: -1.5rem;
+  right: 0;
+}
+
+.reflect .fn::before {
+  content: "λ ";
+}
+
+.reflect .var::before {
+  content: "#'";
+}
+.reflect .namespace::before {
+  content: "ns";
+}
