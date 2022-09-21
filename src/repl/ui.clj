@@ -1,24 +1,50 @@
 (ns repl.ui
-  (:require [bllm.util :as util :refer [defm]]
-            [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [bllm.cli  :as cli]
+            [bllm.util :as util :refer [defm]]))
+
+(defmacro cb
+  "Similar to `fn` but for UI event callbacks. Automatically stops propagation."
+  {:arglists '([params & body] [sym params & body])}
+  [& args]
+  (let [sym (when (symbol? (first args))
+              (first args))
+        [params & body] (if sym (next args) args)
+        event (or (first params) (gensym "e"))]
+    `(fn ~(or sym 'cb)
+       ~(case (count params)
+          0 [event]
+          1 params
+          (throw (ex-info "cb expects zero or one arguments"
+                          {:params params})))
+       ~@body
+       (.stopPropagation ~(with-meta event {:tag 'js/Event})))))
+
+(defm defe
+  "Similar to `defn` but wraps the event handler from `cb` instead of `fn`."
+  [sym params & body]
+  `(def ~sym (cb ~sym ~params ~@body)))
 
 (def not-vector? (complement vector?))
 
-(defn- emit-event [reg sym args]
+(defn- emit-event [reg env sym args]
   (let [interceptors       (take-while not-vector? args)
         [params & handler] (drop-while not-vector? args)
+        m (meta sym)
         a (gensym "args")
-        f (if (and (symbol? params) (empty? handler))
-            params
+        f (if (and (empty? params)
+                   (= 1 (count handler))
+                   (symbol? (first handler)))
+            (first handler) ; [] separates interceptors from user-specified fn.
             (let [[node & args] params]
               `(fn ~sym [~node ~a]
                  ~(if (empty? args)
                     `(do ~@handler)
-                    `(let [[_# ~@args] ~a]
-                       ~@handler)))))]
+                    `(let [[_# ~@args] ~a] ~@handler)))))]
     `(do (def ~sym ~(keyword (str *ns*)
                              (str/replace (name sym) #"^(?:handle|on)-" "")))
-         ~(if-let [w (or (:with (meta sym))
+         ~(when (or (:cmd m) (:kbd m)) (cli/emit-cmd env sym 'repl.ui/cmd))
+         ~(if-let [w (or (:with m)
                          (when (not-empty interceptors)
                            (vec interceptors)))] ; TODO warn if using both
             `(~reg ~sym ~w ~f)
@@ -30,7 +56,7 @@
   `(defm ~sym
      {:args '[interceptors* params & handler]}
      [sym# & args#]
-     (emit-event '~reg sym# args#)))
+     (emit-event '~reg ~'&env sym# args#)))
 
 (defevent* defevent re-frame.core/reg-event-db)
 
@@ -111,7 +137,6 @@
       ~(util/unique-id sym)
       ~(or (:label (meta sym)) (util/label sym))
       (fn ~sym ~@init))))
-
 
 
 (defm defstyle

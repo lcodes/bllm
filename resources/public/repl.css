@@ -23,6 +23,7 @@ body {
   background: var(--bg-page);
   color: var(--text);
   overflow: hidden;
+  white-space: nowrap;
 }
 
 body, button {
@@ -59,6 +60,10 @@ main.boot::after {
 
 main.init::after {
   animation: main-fade 3.1415s infinite ease-in-out;
+}
+
+.workspaces {
+  overflow: hidden;
 }
 
 .mode {

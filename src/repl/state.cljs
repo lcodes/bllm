@@ -1,6 +1,6 @@
 (ns repl.state
   "Strange loops."
-  )
+  (:require [bllm.auth :as auth]))
 
 ;; State in a simulation quickly gets confusing and overwhelming
 ;;

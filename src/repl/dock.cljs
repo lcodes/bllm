@@ -1,6 +1,7 @@
 (ns repl.dock
   "Turns the browser's DOM window into an application dock."
-  (:require [bllm.data :as data]
+  (:require [bllm.cli  :as cli]
+            [bllm.data :as data]
             [bllm.util :as util :refer [def1]]
             [repl.mode :as mode]
             [repl.ui   :as ui]
@@ -9,6 +10,7 @@
 
 (set! *warn-on-infer* true)
 
+(cli/defgroup config)
 
 (comment (js/console.log panes))
 
@@ -16,14 +18,8 @@
   "A snapshot of the current positions, sizes and contents of every dock panel."
   )
 
-#_
 (ui/defschema focus
-  "Currently selected pane view."
-  )
-
-;; icon fonts -> fontawesome? materialicons? both? more?
-;; - naively load all initially, then find ways to load only used icons on demand
-;; - tower of lisp would be useful once more -> compiler should be told about this
+  "Information about the current selection scopes.")
 
 (defn- tab
   [label key]
@@ -77,7 +73,32 @@
    [ui/node panel]]
   #_[ui/node ui/sample-view]
   [ui/node panel nil]
+  [ui/node ui/sample-view]
   )
+
+;; TODO different concerns here
+;; - want command arguments (split :grid) or (split :row)
+;; - not different commands for every possible argument
+;; - emacs has prefix arguments, not sure how to scale directly
+;; - ultimately want curried commands
+;;   - ie (split :row) returns a command instead of executing it
+;;   - then can bind to different keys as separate actions
+;;   - while still keeping composability (ie take argument from selection, or movement, or.. vim!)
+;; - doesnt matter if called from a key sequence, mouse gestures, button clicks or menu items
+
+(ui/defevent split-col
+  {:kbd [Leader w -]}
+  [db]
+  (js/console.log "split col")
+  db)
+
+(ui/defevent split-row
+  {:kbd [Leader w /]}
+  [db]
+  (js/console.log "split row")
+  db)
+
+(comment (cli/call split-row nil))
 
 ;; dock containers
 ;; - each container is a tab view and a current pane view

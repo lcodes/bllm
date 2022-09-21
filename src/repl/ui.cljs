@@ -12,10 +12,13 @@
   (:require-macros [repl.ui])
   (:require [reagent.core  :as rc]
             [re-frame.core :as rf]
+            [bllm.cli  :as cli]
             [bllm.html :as html]
             [bllm.util :as util :refer [def1]]))
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
 
 (comment (js/console.log (deref re-frame.db/app-db)))
 
@@ -365,13 +368,38 @@
 ;;; UI System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- unhandled-click [e]
+  ;; TODO beep! please dont be annoying, mostly useful to inspect clicked elem
+  )
+
+(defn- on-click [^js/Event e]
+  ;; TODO modifiers for filtering, different selection modes, meta selection.
+  (loop [t (.-target e)]
+    (if-let [cmd (.getAttribute t "data-cmd")]
+      (cli/call (keyword cmd) e)
+      (if-let [p (.-parentElement t)]
+        (recur p)
+        (unhandled-click e)))))
+
 (defn init [app-container]
   ;; pull initial state from sessionStorage, localStorage and IndexedDB?
-  )
+  (js/addEventListener "click" (util/callback on-click)))
+
+(defrecord Cmd [kind name icon grp doc tags event])
+
+(defn cmd [k icon grp doc tags event]
+  (cli/register (->Cmd ::cmd k icon (cli/find-group grp) doc tags event)))
+
+(defmethod cli/call* ::cmd [x args]
+  (!> (:event x) args))
 
 
 ;;; Misc. Components & Labels
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(repl.ui/defeffect ^:cmd test-cmd
+  [_ e]
+  (js/console.log e))
 
 (repl.ui/defview sample-view
   "Used to debug `node` dispatch."
@@ -381,9 +409,9 @@
    [:div.row.grow
     [:div.grow
      (key-view view)
-     [:button {:on-click #(!> update-view view inc)} "Click Me"]
+     [:button {:data-cmd (util/fqn test-cmd)} #_{:on-click (repl.ui/cb [e] (!> update-view view inc))} "Click Me"]
      (pretty me)]
-    [:div.grow
+    [:div.grow {:data-cmd (util/fqn test-cmd)}
      [node nil]
      [node :--invalid--]]]])
 
@@ -743,3 +771,7 @@
 
 (def close-btn  (partial btn close-label  "close"))
 (def reload-btn (partial btn reload-label "reload"))
+
+;; icon fonts -> fontawesome? materialicons? both? more?
+;; - naively load all initially, then find ways to load only used icons on demand
+;; - tower of lisp would be useful once more -> compiler should be told about this

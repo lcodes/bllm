@@ -145,6 +145,11 @@
 ;;; Convenience
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn fqn [^Keyword k]
+  (.-fqn k))
+
+(comment (keyword (fqn :hello/world)))
+
 (defn response-test [^js/Response res]
   (if (.-ok res)
     res

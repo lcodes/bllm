@@ -29,10 +29,14 @@
                          ~(some->> set (list 'x))
                          (set! ~sym ~'x))))))
 
+(defn emit-cmd
+  [env sym ctor]
+  (let [{:keys [icon group doc tags]} (meta sym)]
+    `(~ctor ~(util/ns-keyword sym) ~icon
+      ~(group-or-ns env group) ~doc ~tags ~sym)))
+
 (defm defcmd
   "Defines an interactive user function."
   [sym params & body]
-  (let [{:keys [icon group doc tags]} (meta sym)]
-    `(do (defn ~sym ~params ~@body) ; TODO meta parser -> param types, return type
-         (bllm.cli/cmd ~(util/ns-keyword sym) ~icon
-                       ~(group-or-ns &env group) ~doc ~tags ~sym))))
+  `(do (defn ~sym ~params ~@body) ; TODO meta parser -> param types, return type
+       ~(emit-cmd &env sym 'bllm.cli/cmd)))
