@@ -4,12 +4,28 @@
   Specification found at https://www.w3.org/TR/WGSL/"
   (:require-macros [bllm.wgsl :refer [defgpu defwgsl]])
   (:require [bllm.base]
+            [bllm.cli  :as cli]
             [bllm.gpu  :as gpu]
             [bllm.meta :refer [defenum]]
             [bllm.time :as time]
             [bllm.util :as util :refer [def1 === str!]]))
 
 (set! *warn-on-infer* true)
+
+
+;;; Preferences
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(cli/defgroup config)
+
+;; TODO use these
+(cli/defvar recompile-on-eval?
+  "Automatically regenerate impacted shader pipelines following REPL evals."
+  true)
+
+(cli/defvar recompile-on-load?
+  "Automatically regenerate impacted shader pipelines following figwheel loads."
+  true)
 
 
 ;;; Web's Greatest Scripting Legacy

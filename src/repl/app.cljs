@@ -54,7 +54,7 @@
   {:class "window grow"}
   [ui/node menu/bar]
   ;;[ui/node tool/bar]
-  [ui/node dock/bar]
+  [ui/node dock/ing]
   [ui/node mini/bar])
 
 (defn mount

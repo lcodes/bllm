@@ -46,3 +46,20 @@
 }
 
 .bg-secondary { background-color: var(--secondary) !important; }
+
+.panel > .head {
+  border-bottom: solid 1px var(--bg-page);
+}
+.panel > .head > .tabs > li:not(.new) {
+  padding: .0125rem .025rem;
+  background-color: var(--bg-head);
+}
+.panel > .head button {
+  background: transparent;
+  padding: 0;
+  color: var(--text-dark);
+}
+
+.dock, .split, .pane {
+  flex-grow: 1;
+}

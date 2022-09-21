@@ -16,7 +16,8 @@
                     `(do ~@handler)
                     `(let [[_# ~@args] ~a]
                        ~@handler)))))]
-    `(do (def ~sym ~(keyword (str *ns*) (str/replace (name sym) #"^(?:handle|on)-" "")))
+    `(do (def ~sym ~(keyword (str *ns*)
+                             (str/replace (name sym) #"^(?:handle|on)-" "")))
          ~(if-let [w (or (:with (meta sym))
                          (when (not-empty interceptors)
                            (vec interceptors)))] ; TODO warn if using both
@@ -111,13 +112,7 @@
       ~(or (:label (meta sym)) (util/label sym))
       (fn ~sym ~@init))))
 
-(defm defpane
-  ""
-  [sym & init]
-  `(def ~sym
-     (repl.ui/pane
-      ~(util/unique-id sym)
-      (fn ~sym ~@init))))
+
 
 (defm defstyle
   "Idea: CSS from CLJS -> turing complete from the start, pack tiny AST -> expand at runtime; or drive a visual style/theme editor"

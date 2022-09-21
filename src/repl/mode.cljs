@@ -1,5 +1,5 @@
 (ns repl.mode
-  "A 'mode line' reflecting the current state of a UI view."
+  "A 'mode line' reflecting the current state of a UI pane."
   (:require [repl.ui :as ui]))
 
 (set! *warn-on-infer* true)
@@ -10,6 +10,7 @@
 ;; - every status 'mode' gets a UI component to display its state
 
 (ui/deframe line
+  {:layout :row :class "mode"}
   [:div "textures/hello-world.png"]
   [:div " 69 Kb"]
   ui/space

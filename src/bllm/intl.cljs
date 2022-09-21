@@ -1,8 +1,13 @@
 (ns bllm.intl
   "Internationalization & Localization support."
-  (:require [bllm.util :as util :refer [def1]]))
+  (:require [bllm.cli :as cli]))
 
-(def1 locale nil)
+(cli/defgroup config)
+
+(cli/defvar locale
+  (if-let [lang (.-languages js/navigator)]
+    (aget lang 0)
+    js/navigator.language))
 
 ;; - used by `meta` data types flagged as `localized`
 
@@ -18,6 +23,4 @@
 ;; TODO UI will need both these (localized labels & icons)
 
 (defn init []
-  (set! locale (if-let [lang (.-languages js/navigator)]
-                 (aget lang 0)
-                 js/navigator.language)))
+  )

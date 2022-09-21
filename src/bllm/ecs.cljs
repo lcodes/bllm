@@ -1,8 +1,13 @@
 (ns bllm.ecs
-  (:require [bllm.data :as data]
+  (:require [bllm.cli  :as cli]
+            [bllm.data :as data]
             [bllm.util :as util :refer [def1]]))
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
+
+;; TODO cvars for buffer sizes, array lengths
 
 
 ;;; Component Structures and Entity Layouts
@@ -16,6 +21,7 @@
   "Registers a new component structure type."
   []
   )
+
 
 ;;; Simulation Worlds
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

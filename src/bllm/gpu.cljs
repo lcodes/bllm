@@ -13,11 +13,28 @@
   - WebGPU isn't finalized yet, no two browsers implement the same spec version."
   (:refer-clojure :exclude [float keep max min repeat replace])
   (:require-macros [bllm.gpu :refer [defbind deflayout defgpu defstage defres]])
-  (:require [bllm.data :as data]
+  (:require [bllm.cli  :as cli]
+            [bllm.data :as data]
             [bllm.meta :refer [defenum defflag]]
             [bllm.util :as util :refer [def1 defconst]]))
 
 (set! *warn-on-infer* true)
+
+
+;;; Preferences
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(cli/defgroup config
+  "WebGPU commands, feature flags and user settings.")
+
+;; TODO quality settings big enough to need separate module? concern for later
+#_(cli/defvar quality-level
+    {:set on-quality-level}
+    0)
+
+;; cli/defvar for default buffer sizes, chunk sizes, batch sizes
+;; - no more reason to hardcode anything!
+;; - changing var or calling cmd from user inputs -> just like a micro REPL
 
 
 ;;; Initialization - Adapter, Features & Device

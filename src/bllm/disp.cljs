@@ -2,11 +2,18 @@
   "The display sub-system. Controls the `requestAnimationFrame` cycle.
 
   Also integrates the browser's page visibility and fullscreen APIs."
-  (:require [bllm.gpu  :as gpu]
+  (:require [bllm.cli :as cli]
+            [bllm.gpu  :as gpu]
             [bllm.util :as util :refer [def1 === !==]]
             [bllm.html :as html]))
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
+
+(cli/defvar target-fps 60) ; TODO frame skip / throttle / based on context (ie editor/idle/bg values)
+
+(cli/defvar pixel-ratio js/devicePixelRatio)
 
 
 ;;; Page Visibility
@@ -114,16 +121,18 @@
 (defn add-viewport
   "Registers a canvas as a WebGPU viewport. If pixel-ratio is positive, the
   canvas and its associated resources will automatically be resized."
-  [canvas pixel-ratio]
-  (let [vp #js {:canvas canvas
-                :target (gpu/html-render-target canvas)
-                :index  (util/find-free-index viewports)
-                :resize (js/Set.) ; Resources to propagate resize events to.
-                :pixel_ratio pixel-ratio}]
-    (aset viewports vp.index vp)
-    (when (pos? pixel-ratio)
-      (.observe resize-observer (html/parent canvas)))
-    vp))
+  ([canvas]
+   (add-viewport canvas pixel-ratio))
+  ([canvas pixel-ratio]
+   (let [vp #js {:canvas canvas
+                 :target (gpu/html-render-target canvas)
+                 :index  (util/find-free-index viewports)
+                 :resize (js/Set.) ; Resources to propagate resize events to.
+                 :pixel_ratio pixel-ratio}]
+     (aset viewports vp.index vp)
+     (when (pos? pixel-ratio)
+       (.observe resize-observer (html/parent canvas)))
+     vp)))
 
 (defn remove-viewport [vp]
   (aset viewports vp.index nil)

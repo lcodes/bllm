@@ -1,6 +1,7 @@
 (ns bllm.net
-  (:require [bllm.meta :as meta]
+  (:require [bllm.cli  :as cli]
             [bllm.ecs  :as ecs]
+            [bllm.meta :as meta]
             [bllm.util :as util :refer [def1]]))
 
 ;; https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API
@@ -9,6 +10,8 @@
 ;; TODO development connection servers
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
 
 
 ;;; Collaborative Grid
@@ -25,19 +28,19 @@
 ;;   - doesn't tell users how it's meant to be played
 ;; - maintain meta/schema mappings between hosts
 
-(defn connect []
+(cli/defcmd connect []
   ;; open a connection to a listening peer
   )
 
-(defn disconnect []
+(cli/defcmd disconnect []
   ;; disconnect from a peer
   )
 
-(defn listen []
+(cli/defcmd listen []
   ;; accept connections from remote peers
   )
 
-(defn close []
+(cli/defcmd close []
   ;; stop accepting connections, disconnect peers
   )
 

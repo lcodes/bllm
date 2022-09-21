@@ -61,6 +61,10 @@ main.init::after {
   animation: main-fade 3.1415s infinite ease-in-out;
 }
 
+.mode {
+  background-color: var(--bg-page);
+}
+
 .reflect table {
   position: relative;
 }
@@ -73,6 +77,9 @@ main.init::after {
   color: var(--text-muted);
 }
 
+.reflect .ident.symbol::before {
+  content: "'";
+}
 .reflect .ident.keyword::before {
   content: ":";
 }

@@ -23,7 +23,7 @@
 (ui/defclass Viewport
   (component-did-mount []
     ;; register input events, create swapchain as state, connect viewport to camera
-    (disp/add-viewport :TODO js/devicePixelRatio))
+    (disp/add-viewport :TODO))
   (component-will-unmount []
     (disp/remove-viewport :TODO))
   (reagent-render []

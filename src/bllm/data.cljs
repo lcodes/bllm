@@ -1,11 +1,14 @@
 (ns bllm.data
   (:refer-clojure :exclude [import load])
   (:require-macros [bllm.data :as data])
-  (:require [bllm.util :as util :refer [def1]]
+  (:require [clojure.string :as str]
+            [bllm.cli  :as cli]
             [bllm.meta :as meta]
-            [clojure.string :as str]))
+            [bllm.util :as util :refer [def1]]))
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
 
 ;; TODO LZ4 wasm worker to pack/unpack blobs -> limit blobs to transferable types
 ;; - loading data in worker then passing around would deep clone it, bad
@@ -73,7 +76,7 @@
 (defn- create-json [blob]
   (-> (util/response-text blob) ^js/Promise (.then js/JSON.parse)))
 
-(defn create
+(cli/defcmd create
   "Creates a new asset from a `js/Blob`."
   [url-or-src blob]
   (let [src (parse-src (if (string? url-or-src)
@@ -95,7 +98,7 @@
              fetch-json create-json) blob)
           (.then #(load src %))))))
 
-(defn import
+(cli/defcmd import
   "Imports a new asset from a `js/URL` or a string."
   [url]
   (let [src (parse-src #js {:url url})
@@ -117,9 +120,15 @@
 ;;; IndexedDB
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def1 ^:private project
+;; TODO project management (one db per project, multi-db projects -> all one context)
+#_(cli/defcmd build [])
+
+(defn- on-change-project [])
+
+(cli/defvar project
   "Name of the IndexedDB database."
-  "bllm") ; TODO project management (one db per project, multi-db projects -> all one context)
+  {:set on-change-project}
+  "user")
 
 (def1 ^:private version
   "Bumped when a release includes schema changes.

@@ -17,6 +17,8 @@
 
 (set! *warn-on-infer* true)
 
+(comment (js/console.log (deref re-frame.db/app-db)))
+
 
 ;;; Application Schema - Make re-frame even more declarative than it already is.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -119,10 +121,10 @@
   [db node]
   (do-register db node))
 
-(defn register
+(defn register-node
   "Registers a managed UI `node`."
-  [node]
-  (rf/dispatch-sync [on-register node]) ; TODO if this gets too trigger-happy, batch between ticks
+  [node] ; TODO if this gets too trigger-happy, batch between ticks
+  (rf/dispatch-sync [on-register node])
   (:name node))
 
 (defn- merge-schema-spec [db init]
@@ -166,9 +168,6 @@
    local! event}) ; TODO not always to local storage
 
 
-(comment (js/console.log (deref re-frame.db/app-db)))
-
-
 ;;; Composable Style Sets -
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -199,7 +198,7 @@
     :render (fn [this]
               (rc/as-element
                (if-let [^js/Error e (:error (rc/state this))]
-                 [:section.error-boundary.scroll
+                 [:section.error-boundary.content.scroll
                   [:h3 "Error"]
                   [:p [:button.btn.btn-sm.btn-secondary
                        {:type "button" :on-click #(rc/set-state this {:error nil})}
@@ -222,7 +221,7 @@
   [:p.lead "View Key: " (str k)])
 
 (defmethod node* :default [{:as node :keys [kind]} view-key data]
-  [:div.error
+  [:div.error.content
    [:h3 (cond (nil? node) "Missing node"
               (nil? kind) "Invalid node"
               :else       "Missing kind")]
@@ -253,28 +252,33 @@
 
 (defn frame
   [k tags elem class layout transient? initial-views]
-  (register {:kind :frame
-             :name k
-             :tags tags
-             :elem (or elem :div)
-             :class class
-             :layout (or layout :col)
-             :transient? transient?
-             :views initial-views}))
+  (register-node
+   {:kind :frame
+    :name k
+    :tags tags
+    :elem (or elem :div)
+    :class class
+    :layout (or layout :col)
+    :transient? transient?
+    :views initial-views}))
 
 (defmethod node* :frame [{:keys [elem class layout views]} view-key state]
   `[~elem {:class ~(html/class "frame" (name layout) class)}
-    ~@(or state views)]) ; TODO use `views` when creating the frame state, should never be nil here
+    ~@(or state views)])
 
 (defn view
   [k v]
-  ;; view hash, label, view function, context flags, preferred container
-  ;; flags include singleton, system, pane etc
-  (register {:kind :view :name k :view v}))
+  ;; TODO hash, label, context tags
+  (register-node
+   {:kind :view :name k :view v}))
 
-(defmethod node* :view [{:keys [view]} view-key v]
+(defmethod node* :view [{:keys [view]} k v]
   ;; view options (ID/class, managed hooks)
-  (view view-key v))
+  (view k v))
+
+(repl.ui/defevent update-view
+  [db view-key f & args]
+  (apply update-in db [state views view-key] f args))
 
 
 ;;; Modal Panes - Managed views with associated selection data and editor modes.
@@ -289,7 +293,8 @@
   [k base view]
   ;; kinda analogue to model shaders -> where views are effect shaders, and components are system shaders.
   ;; GOOD -> UI shaders is the next logical step
-  (register {:kind :pane :name k :base base :view view}))
+  (register-node
+   {:kind :pane :name k :base base :view view}))
 
 (def ^:dynamic *panel*
   "The UI panel a view is being rendered in."
@@ -376,6 +381,7 @@
    [:div.row.grow
     [:div.grow
      (key-view view)
+     [:button {:on-click #(!> update-view view inc)} "Click Me"]
      (pretty me)]
     [:div.grow
      [node nil]

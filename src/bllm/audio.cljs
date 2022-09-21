@@ -1,5 +1,6 @@
 (ns bllm.audio
-  (:require [bllm.data  :as data]
+  (:require [bllm.cli   :as cli]
+            [bllm.data  :as data]
             [bllm.ecs   :as ecs]
             [bllm.scene :as scene]
             [bllm.util  :as util :refer [def1]]))
@@ -9,6 +10,11 @@
 ;; TODO investigate https://developer.mozilla.org/en-US/docs/Web/API/WebCodecs_API
 
 (set! *warn-on-infer* true)
+
+(cli/defgroup config)
+
+;; TODO cmds & vars to control the mixer
+(cli/defcmd mute [] #_TODO)
 
 
 ;;; System Context
