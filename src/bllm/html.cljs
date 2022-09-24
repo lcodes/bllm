@@ -32,3 +32,13 @@
    (class a (class b (class c d))))
   ([a b c d e]
    (class a (class b (class c (class d e))))))
+
+(defn find-attr [^js/Event e attr]
+  (loop [t (.-target e)]
+    (if-let [x (.getAttribute t attr)]
+      x
+      (when-let [p (.-parentElement t)]
+        (recur p)))))
+
+(defn find-attr-key [e attr]
+  (some-> (find-attr e attr) keyword))

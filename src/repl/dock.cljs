@@ -48,14 +48,10 @@
     [:img {:width 256 :src "https://learnopengl.com/img/textures/wall.jpg"}]]
    [ui/node mode/line k]])
 
-(ui/deframe col {:layout :col :sep ui/split})
-(ui/deframe row {:layout :row :sep ui/split})
+(ui/deframe col {:layout :col})
+(ui/deframe row {:layout :row})
 
-#_
-(ui/deframe temp-bar
-  {:layout :row}
-  [ui/node home/welcome]
-  [schema/view ui/views-sub])
+
 ;; deframe -> DECIDE IF INSTANCED/SINGLETON THERE
 ;; -> only one of menu/tool/dock/mini, and one window
 ;; -> but multiple dock splitter frames
@@ -64,17 +60,21 @@
 ;; - singleton is toggled on/off globally, as a user preference (toggle independently of view state)
 ;; - instance is created/destroyed on user demand, usually by splitting or merging dock panels
 
-(ui/deframe ing
+;; TODO how to track focus, what focus to track
+;; - single focus regardless of number of input devices
+;; - cmds to move focus (switch to tab, goto def, move to pane, etc)
+;; - panes have focus, views alone dont (but panes contain a view, and are a view)
+
+(ui/defview test-view []
+  [:div.content
+   [:h3 "Test View"]
+   [:button {:data-cmd (util/fqn ::split)} "Split Column"]
+   [:button {:data-cmd (util/fqn ::split)} "Split Row"]])
+
+(ui/deframe ^:static ing
   "The main application view is a fully customizable dock."
-  {:class "dock" :sep ui/split}
-  #_[ui/node temp-bar]
-  #_[:div.row
-   [ui/node home/summary]
-   [ui/node panel]]
-  #_[ui/node ui/sample-view]
-  [ui/node panel nil]
-  [ui/node ui/sample-view]
-  )
+  {:class "dock"}
+  [ui/node :repl.home/welcome])
 
 ;; TODO different concerns here
 ;; - want command arguments (split :grid) or (split :row)
@@ -86,19 +86,60 @@
 ;;   - while still keeping composability (ie take argument from selection, or movement, or.. vim!)
 ;; - doesnt matter if called from a key sequence, mouse gestures, button clicks or menu items
 
-(ui/defevent split-col
-  {:kbd [Leader w -]}
-  [db]
-  (js/console.log "split col")
-  db)
+(defn- view-index [frame view-key]
+  (let [cnt (count frame)]
+    (loop [n 0]
+      (let [[v k] (nth frame n)]
+        (if (and ;;(= v ui/node) TODO arity overload breaks this
+                 (= k view-key))
+          n
+          (let [n (inc n)]
+            (assert (< n cnt) "Missing view in frame")
+            (recur n)))))))
+
+(defn- add-view [views index view]
+  (let [n (inc index)]
+    (concat (take n views) (list view) (drop n views))))
+
+(defn- replace-view [views n view]
+  (concat (take n views) (list view) (drop (inc n) views)))
+
+(def layout-hack {:row ::row :col ::col}) ; map layout keys to dock frame IDs
+
+(defn- frame [view-state new-k node-k cur-k index view]
+  (let [cur-v (-> view-state cur-k (nth index))]
+    (-> view-state
+        (assoc  new-k (list cur-v view))
+        (update cur-k replace-view index [ui/node node-k new-k]))))
+
+(defn- split-view [state frame-k view-k layout]
+  (let [frame (ui/node-of state frame-k)
+        views (ui/view-of state frame-k)
+        index (view-index views view-k)
+        split [:div "Hello!"]]
+    (if (= layout (:layout frame))
+      (update-in state [ui/views frame-k] add-view index split)
+      (let [new-k  (ui/gen-view-id)
+            node-k (layout-hack layout)]
+        (-> state
+            (update ui/links assoc new-k node-k)
+            (update ui/views frame new-k node-k frame-k index split))))))
+
+(ui/defevent split
+  {:kbd [Leader w s]}
+  [db x layout]
+  (if-let [k (ui/frame-key x)]
+    (update db ui/state split-view k (ui/view-key x) (or layout :row))
+    (do (js/console.warn "TODO no frame focus, also need user facing logs")
+        db)))
 
 (ui/defevent split-row
   {:kbd [Leader w /]}
   [db]
-  (js/console.log "split row")
+  ;; TODO reuse `split` with default argument
   db)
 
-(comment (cli/call split-row nil))
+(comment (cli/call split nil))
 
 ;; dock containers
 ;; - each container is a tab view and a current pane view

@@ -4,7 +4,7 @@
 
 (set! *warn-on-infer* true)
 
-(ui/defview title
+(ui/defview ^:static title
   "Application icon and label, with their associated system menu."
   []
   [:h1.title "REPL"]) ; TODO what the doc says (also let current dock/mode replace/decorate the icon)
@@ -15,7 +15,7 @@
    [:a {:href "#"} label
     (ui/close-btn identity)]])
 
-(ui/defview docks
+(ui/defview ^:static docks
   "Main application tabs, each completely swapping the current modal dock state.
 
   Inspired from the workspace implementation found in Doom Emacs."
@@ -39,7 +39,7 @@
 (defn- on-maximize [])
 (defn- on-quit [])
 
-(ui/defview system
+(ui/defview ^:static system
   "Controls for the current dock or the entire window when running in Electron."
   []
   ;; TODO needs to be displayed even if the menu view is disabled (but still allow power disable)
@@ -49,7 +49,7 @@
    [:li (ui/btn ui/close-label "system-btn quit" on-quit)]])
 
 ;; TODO usually hidden to save screen space -> still display when pressing ALT or enabled
-(ui/deframe bar
+(ui/deframe ^:static bar
   "Application control and navigation to be displayed at the top of the window."
   {:elem :header :layout :row :class "bg-secondary"}
   [ui/node title]

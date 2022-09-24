@@ -22,6 +22,14 @@
 
 (comment (js/console.log (deref re-frame.db/app-db)))
 
+(def1 ^:private next-view-id (atom 0))
+
+(defn gen-view-id
+  ([]
+   (gen-view-id ""))
+  ([prefix]
+   (str prefix \# (swap! next-view-id inc))))
+
 
 ;;; Application Schema - Make re-frame even more declarative than it already is.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -116,13 +124,29 @@
 
 (declare state)
 (declare nodes)
+(declare views)
 
-(defn- do-register [m node]
-  (assoc-in m [state nodes (:name node)] node))
+(defn- upsert [m k new-v old-v]
+  (let [v (m k)]
+    (if (not= old-v v)
+      m
+      (cond new-v (assoc m k new-v)
+            old-v (dissoc m k)
+            :else (do (assert (nil? v)) m)))))
+
+(comment (-> {}
+             (upsert :x 1 nil)
+             (upsert :x 2 1)
+             (upsert :x 3 1)))
+
+(defn- do-register [m {:as node :keys [name tags]}]
+  (cond-> (assoc-in m [nodes name] node)
+    (contains? tags :static) (update views upsert name (:init node)
+                                     (-> m nodes name :init))))
 
 (repl.ui/defevent ^:private on-register
   [db node]
-  (do-register db node))
+  (update db state do-register node))
 
 (defn register-node
   "Registers a managed UI `node`."
@@ -141,11 +165,11 @@
   [db {:as m :keys [name specs]}]
   (-> db
       (update name merge-schema specs)
-      (do-register m)))
+      (update state do-register m)))
 
 (defn schema
   [key specs]
-  (let [node {:kind :schema :name key :specs specs}]
+  (let [node {:kind ::schema :name key :specs specs}]
     (rf/dispatch-sync [on-schema node])
     key))
 
@@ -154,10 +178,11 @@
   {:store :user} ; TODO use this to make durable and specify data store (:user delegates to session/local storage, or cloud later)
   theme :default ; TODO hardcoded -> swap css vars -> swap `style` entries -> zen garden
   style {} ; "CSS 'components' (later -> raw CSS used now)"
-  menus {} ; "Command components (view ID -> view trigger)"
-  panes {} ; "Instanced components (view ID -> view state)"
-  views {} ; "Singleton components (viewkey -> view state)"
-  nodes {} ;
+  menus {}
+  panes {}
+  views {} ; Durable view models
+  links {} ; Node/View relations
+  nodes {} ; UI node definitions
   prefs {} ; "Configurable user options (opt key -> value)" ;; TODO schema here, values in `repl.state` -> decouple update frequency
   ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
   )
@@ -215,69 +240,111 @@
   []
   )
 
-(defmulti node*
-  "Every method implements a unique kind of managed view, see also `node`."
-  (fn node-dispatch [n k v]
-    (:kind n)))
-
 (defn- key-view [k]
   [:p.lead "View Key: " (str k)])
-
-(defmethod node* :default [{:as node :keys [kind]} view-key data]
-  [:div.error.content
-   [:h3 (cond (nil? node) "Missing node"
-              (nil? kind) "Invalid node"
-              :else       "Missing kind")]
-   (key-view view-key)
-   [:pre (cljs.pprint/pprint node)]
-   [:pre (cljs.pprint/pprint data)]])
-
-(defn node
-  "Component host to a managed `view` and its state data."
-  ([node-k] ; Singleton view
-   (node node-k node-k))
-  ([node-k view-k] ; Instanced view
-   (let [n @($get nodes-sub node-k)
-         v @($get views-sub view-k)]
-     [error-boundary (node* n view-k v)]))) ; TODO optional error-boundary
-
-(def space "Reusable spacer view component." [:div.space.grow])
-
-(def split "Reusable resize handle component." [:div.split])
 
 (defn pretty [x]
   ;; TODO throw this to a code highlighter (embedded text editor or custom built)
   [:pre.tty (with-out-str (cljs.pprint/pprint x))])
 
+(def space "Reusable spacer view component." [:div.space.grow])
 
-;;; System Views - Managed components with durable state and a delegated render.
+(def split "Reusable resize handle component." [:div.split])
+
+
+;;; Simple Views - Managed components with durable state and a delegated render.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn frame
-  [k tags elem class layout transient? initial-views]
+(defmulti node*
+  "Every method implements a unique kind of managed view, see also `node`."
+  (fn node-dispatch [n k v]
+    (:kind n)))
+
+(defmethod node* :default [{:as node :keys [kind]} {:as data :keys [key]}]
+  [:div.error.content
+   [:h3 (cond (nil? node) "Missing node"
+              (nil? kind) "Invalid node"
+              :else       "Missing kind")]
+   (key-view key)
+   (pretty node)
+   (pretty data)])
+
+(def1 interceptors
+;; - main :: globally executed on every node (state mgmt, dynamic vars, error-boundary, strict-mode)
+;; - kind :: executed on every node of its kind (track current *frame*)
+;; - node :: specifed on the definition (dock frames get splitter elements interposed)
+;; - view :: featured in the view state (optional shared components, final composition)
+;;
+;; node interceptors embedded in definitions, view in app-db.state.views
+  (js/Map.))
+
+(comment (js/console.log interceptors))
+
+(defn interceptor [k before after]
+  {:name k :before before :after after})
+
+(defn intercept
+  ([at k before after]
+   (intercept at (interceptor k before after)))
+  ([at x]
+   (if-let [xs (.get interceptors at)]
+     (let [k (:name x)]
+       (if-let [n (.findIndex xs #(= (:name %) k))]
+         (aset xs n x)
+         (.push xs x)))
+     (.set interceptors at #js [x]))))
+
+(intercept :main ::error-boundary nil
+           (fn wrap-error-boundary [ctx]
+             #_TODO))
+
+(defn node
+  "Component host to a managed `view` and its index data."
+  ([node-k] ; Singleton view
+   (node node-k node-k))
+  ([node-k view-k] ; Instanced view
+   (let [n @($get nodes-sub node-k)
+         v @($get views-sub view-k)]
+     (assert (= node-k (:name n)))
+     ;;(assert (= view-k (:key  v)))
+     ;; TODO run interceptors
+     [error-boundary (node* n view-k v)])))
+
+(defn view
+  [k tags init v]
   (register-node
-   {:kind :frame
+   {:kind ::view :name k :tags tags :init init :view v}))
+
+(defmethod node* ::view [{:keys [view]} view-key data]
+  (let [html (view data)
+        attr (second html)]
+    (if-not (map? attr)
+      (apply vector (first html) {:data-view (util/fqn view-key)} (rest html))
+      (if (contains? attr :data-view)
+        html
+        (update html 1 assoc :data-view (util/fqn view-key))))))
+
+(defn frame
+  [k tags elem class layout initial-views]
+  (register-node
+   {:kind ::frame
     :name k
     :tags tags
     :elem (or elem :div)
     :class class
     :layout (or layout :col)
-    :transient? transient?
-    :views initial-views}))
+    :init initial-views}))
 
-(defmethod node* :frame [{:keys [elem class layout views]} view-key state]
-  `[~elem {:class ~(html/class "frame" (name layout) class)}
-    ~@(or state views)])
+(defn key-data [x]
+  (if (keyword? x)
+    (util/fqn x)
+    x))
 
-(defn view
-  [k v]
-  ;; TODO hash, label, context tags
-  (register-node
-   {:kind :view :name k :view v}))
-
-(defmethod node* :view [{:keys [view]} k v]
-  ;; view options (ID/class, managed hooks)
-  (view k v))
+(defmethod node* ::frame [{:keys [elem class layout]} view-key data]
+  (apply vector elem
+         {:class      (html/class "frame" (name layout) class)
+          :data-frame (key-data view-key)}
+         data))
 
 (repl.ui/defevent update-view
   [db view-key f & args]
@@ -297,13 +364,13 @@
   ;; kinda analogue to model shaders -> where views are effect shaders, and components are system shaders.
   ;; GOOD -> UI shaders is the next logical step
   (register-node
-   {:kind :pane :name k :base base :view view}))
+   {:kind ::pane :name k :base base :view view}))
 
 (def ^:dynamic *panel*
   "The UI panel a view is being rendered in."
   nil)
 
-(defmethod node* :pane [n k v]
+(defmethod node* ::pane [n k v]
   ;; TODO what really makes pane different from view here?
   ;; - decorations & modeline handled by `dock/panel`
   ;; - anything else is view specific, and composes from there (ie text editor isnt texture viewer isnt material editor isnt shader graph)
@@ -352,16 +419,19 @@
 ;;   - could be useful to go through macroexpansions, file navigation, literate subviews, live previews etc
 
 
-;;; Context Menus -
+;;; Contextual views -
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; popup menus (same logic as main menu, but on button press or context events)
+
+;; modal ::
+;; slide ::
 
 (defn menu
   [k init]
   k) ; TODO
 
-(defmethod node* :menu [n k v]
+(defmethod node* ::menu [n k v]
   [:ul.menu "MENU"])
 
 
@@ -372,14 +442,11 @@
   ;; TODO beep! please dont be annoying, mostly useful to inspect clicked elem
   )
 
-(defn- on-click [^js/Event e]
+(defn- on-click [e]
   ;; TODO modifiers for filtering, different selection modes, meta selection.
-  (loop [t (.-target e)]
-    (if-let [cmd (.getAttribute t "data-cmd")]
-      (cli/call (keyword cmd) e)
-      (if-let [p (.-parentElement t)]
-        (recur p)
-        (unhandled-click e)))))
+  (if-let [cmd (html/find-attr-key e "data-cmd")]
+    (cli/call cmd e)
+    (unhandled-click e)))
 
 (defn init [app-container]
   ;; pull initial state from sessionStorage, localStorage and IndexedDB?
@@ -397,6 +464,37 @@
 ;;; Misc. Components & Labels
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- read-key [^string x]
+  (if (= 35 (.charCodeAt x 0))
+    x
+    (keyword x)))
+
+(defn view-key
+  "Coerce its argument to a view key."
+  ([x]
+   (view-key "data-view" x))
+  ([k x]
+   (cond (instance? js/Event x) (some-> (html/find-attr x k) read-key)
+         (keyword? x) x
+         (string?  x) x
+         :else (throw (ex-info "Can't coerce view-key" {:value x})))))
+
+(def frame-key (partial view-key "data-frame"))
+
+(defn node-of
+  [state k]
+  (let [v (if (keyword? k)
+            k
+            (-> state links (get k) (or (throw (ex-info "Missing UI link"
+                                                        {:ui state :link k})))))]
+    (-> state nodes v (or (throw (ex-info "Missing UI node"
+                                          {:ui state :node v}))))))
+
+(defn view-of
+  [state k]
+  (-> state views (get k) (or (throw (ex-info "Missing UI view"
+                                        {:ui state :view k})))))
+
 (repl.ui/defeffect ^:cmd test-cmd
   [_ e]
   (js/console.log e))
@@ -412,7 +510,6 @@
      [:button {:data-cmd (util/fqn test-cmd)} #_{:on-click (repl.ui/cb [e] (!> update-view view inc))} "Click Me"]
      (pretty me)]
     [:div.grow {:data-cmd (util/fqn test-cmd)}
-     [node nil]
      [node :--invalid--]]]])
 
 ;; TODO this grew a bit wildly while listening to a podcast, move to another module, find way to extract meta

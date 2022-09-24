@@ -49,7 +49,7 @@
       (catch :default e
         (halt/exceptional-pause e (util/callback tick))))))
 
-(ui/deframe window
+(ui/deframe ^:static window
   "Root view of the UI component tree. Covers the full client area of `main`."
   {:class "window grow"}
   [ui/node menu/bar]

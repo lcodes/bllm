@@ -34,30 +34,30 @@
 ;;   - vim-style command language is the foundation everywhere, a composable command language with leader keys
 ;;   - command input take focus priority, can still navigate mid-command (ie drag object from any view as arg)
 
-(ui/defview background-tasks
+(ui/defview ^:static background-tasks
   []
   [:p.background-tasks 0 [:span.icon "📝"]])
 
-(ui/defview log-message
+(ui/defview ^:static log-message
   []
   [:p.log-message "Hello World"])
 
-(ui/defview layout-select
+(ui/defview ^:static layout-select
   []
   [:select.layout ; TODO select2 or custom replacement
    [:option "Default"]])
 
-(ui/defview user-button
+(ui/defview ^:static user-button
   []
   [:p "Myself 👤"])
 
-(ui/defview status-icons
+(ui/defview ^:static status-icons
   []
   ;; configure which "services" to display the status of, define notion of service
   [:p "🖧 🔌 🔋 🔊"])
 
 ;; TODO display modes; hidden, on hover, on key, disabled
-(ui/deframe bar
+(ui/deframe ^:static bar
   "The mini-bar is stocked with specialty beverages and snacks for visitors."
   {:elem :footer :layout :row :class "bg-secondary"}
   ;; TODO grab state of system frames from filtering nodes, then sorting by priority (neg to left, pos to right)

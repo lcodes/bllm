@@ -30,6 +30,10 @@ body, button {
   font-family: var(--font-body);
 }
 
+*, ::after, ::before {
+  box-sizing: border-box;
+}
+
 
 /* Application Bootstrap */
 /******************************************************************************/

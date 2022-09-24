@@ -119,12 +119,12 @@
 (defn view
   [x]
   [:div.reflect.content.scroll
-   [reflect* ^{:key sub} x]])
+   [reflect* x]])
 
-(defmethod ui/node* :schema [n v] ; TODO use this -> forward to `reflect`
-  [:div "UI view describing another UI view, or itself, who knows"])
+(defmethod ui/node* ::ui/schema [model state]
+  ;; TODO use `state` as a bit-array of navigation states -> change updates version, version is hash, hash is signal trigger
+  (view model))
 
-#_[:img {:width 480 :height 360 :src "https://preview.redd.it/dys3wj2z9ue61.jpg?auto=webp&s=511078554dbb75c73fb0e791d4d1802b43db9801"}]
 
 ;; TODO debug views?
 ;; - re-frame-10x inspired timelines

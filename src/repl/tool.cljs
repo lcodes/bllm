@@ -30,26 +30,26 @@
 ;; - ie 3D movement can be a region within the scene, and every region-making method is valid (pick bounding box, drag view, group bounding boxes, etc)
 ;; - not limited to text as a context; everything is data with the means to understand it at hand
 
-(ui/defview context
+(ui/defview ^:static context
   []
   ;; similar to browser's address bar, but to select the current ECS scene instead of HTML document
   ;; - easily pull external scenes, get deeplink to share current scene, bookmark, etc
   [:div "CONTEXT HELP?"])
 
-(ui/defview bookmark
+(ui/defview ^:static bookmark
   []
   ;; favorite deeplinks, from changing ECS scenes to dock panel views
   [:div "FAVORITES"])
 
-(ui/defview mem-stats
+(ui/defview ^:static mem-stats
   []
   [:div "MEM"])
 
-(ui/defview cpu-stats
+(ui/defview ^:static cpu-stats
   []
   [:div "CPU"])
 
-(ui/defview gpu-stats
+(ui/defview ^:static gpu-stats
   []
   [:div "GPU"])
 
@@ -68,7 +68,7 @@
 (defn- btn [label click]
   [:li.icon [:button.tool-btn {:on-click click} label]])
 
-(ui/defview engine-btns
+(ui/defview ^:static engine-btns
   "What do we want? Faster horses! What is this car you speak of? What's a cdr?"
   []
   [:div.buttons
@@ -88,7 +88,7 @@
    [btn "📦" pack]
    [btn "⚙" options]])
 
-(ui/deframe bar
+(ui/deframe ^:static bar
   {:elem :nav :layout :row :class "bg-secondary"}
   [ui/node bookmark]
   [ui/node context]

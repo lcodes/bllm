@@ -97,6 +97,21 @@
          ~@(map emit-schema-sub syms keys))
        (repl.ui/schema ~sym ~(zipmap keys inits)))))
 
+(def conj-set (fnil conj #{}))
+
+(defn- merge-tags [{:keys [static]} tags]
+  (if static (conj-set tags :static) tags))
+
+(defm defview
+  "Defines a configurable UI view panel."
+  [sym params & view]
+  (let [{:as m :keys [tags init]} (meta sym)]
+    `(def ~sym
+       (repl.ui/view ~(util/ns-keyword sym)
+                     ~(merge-tags m tags)
+                     ~init
+                     (fn ~sym ~params ~@view)))))
+
 (defm deframe
   "Defines a configurable UI node container. Pulls `re-frame` off the wall.
 
@@ -104,7 +119,6 @@
   has no existing state. Otherwise, the views configured by the user are used.
 
   Optional metadata is used to configure the frame:
-  `:transient` disables durability of the views state.
   `:layout` is how to position and size UI nodes, defaults to `:horizontal`.
   `:class` is a string of space separated class names, only used by CSS and JS.
   `:elem` is the HTML element to use, defaults to `:div`.
@@ -117,17 +131,13 @@
 
   NOTE view state is only made durable when it changed from its default value."
   [sym & initial-views]
-  (let [m (meta sym)]
+  (let [{:as m :keys [tags elem class layout]} (meta sym)]
     `(def ~sym
        (repl.ui/frame
         ~(util/ns-keyword sym)
-        ~(:tags m) ~(:elem m) ~(:class m) ~(:layout m) ~(:transient? m)
+        ~(merge-tags m tags)
+        ~elem ~class ~layout
         [~@initial-views]))))
-
-(defm defview
-  "Defines a configurable UI view panel."
-  [sym params & view]
-  `(def ~sym (repl.ui/view ~(util/ns-keyword sym) (fn ~sym ~params ~@view))))
 
 (defm defmode
   "Defines a UI mode. Has an associated asset definition and selection."
