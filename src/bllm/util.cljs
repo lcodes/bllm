@@ -148,6 +148,11 @@
 (defn fqn [^Keyword k]
   (.-fqn k))
 
+(defn key-of [x]
+  (if (keyword? x)
+    (fqn x)
+    x))
+
 (comment (keyword (fqn :hello/world)))
 
 (defn response-test [^js/Response res]

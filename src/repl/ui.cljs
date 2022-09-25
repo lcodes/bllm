@@ -18,17 +18,17 @@
 
 (set! *warn-on-infer* true)
 
-(cli/defgroup config)
-
 (comment (js/console.log (deref re-frame.db/app-db)))
+
+(cli/defgroup config)
 
 (def1 ^:private next-view-id (atom 0))
 
 (defn gen-view-id
   ([]
-   (gen-view-id ""))
+   (gen-view-id "view"))
   ([prefix]
-   (str prefix \# (swap! next-view-id inc))))
+   (str \# (util/key-of prefix) \# (swap! next-view-id inc))))
 
 
 ;;; Application Schema - Make re-frame even more declarative than it already is.
@@ -126,7 +126,10 @@
 (declare nodes)
 (declare views)
 
-(defn- upsert [m k new-v old-v]
+(defn- upsert-static-view
+  "Inserts the initial state of a view with the `:static` tag, or updates it when
+  it already exists and it's value hasn't been manipulated by user events."
+  [m k new-v old-v]
   (let [v (m k)]
     (if (not= old-v v)
       m
@@ -139,17 +142,19 @@
              (upsert :x 2 1)
              (upsert :x 3 1)))
 
-(defn- do-register [m {:as node :keys [name tags]}]
+(defn- do-register
+  [m {:as node :keys [name tags]}]
   (cond-> (assoc-in m [nodes name] node)
-    (contains? tags :static) (update views upsert name (:init node)
-                                     (-> m nodes name :init))))
+    (contains? tags :static) (update views upsert-static-view name
+                                     (:init node) (-> m nodes name :init))))
 
 (repl.ui/defevent ^:private on-register
+  "Adds a UI node definition to the UI state."
   [db node]
   (update db state do-register node))
 
 (defn register-node
-  "Registers a managed UI `node`."
+  "Registers a managed UI view, to be displayed using `node` as a host."
   [node] ; TODO if this gets too trigger-happy, batch between ticks
   (rf/dispatch-sync [on-register node])
   (:name node))
@@ -178,12 +183,13 @@
   {:store :user} ; TODO use this to make durable and specify data store (:user delegates to session/local storage, or cloud later)
   theme :default ; TODO hardcoded -> swap css vars -> swap `style` entries -> zen garden
   style {} ; "CSS 'components' (later -> raw CSS used now)"
-  menus {}
-  panes {}
-  views {} ; Durable view models
+  popup {} ; Menus, dialogs, modals, slides, asides, notifications and other self-positioned content.
+  panes {} ; View models for the opened selections; panel content & tabs index.
+  views {} ; Durable view models (TODO actually implement durability)
   links {} ; Node/View relations
   nodes {} ; UI node definitions
   prefs {} ; "Configurable user options (opt key -> value)" ;; TODO schema here, values in `repl.state` -> decouple update frequency
+  focus {} ; TODO where is the UI/dock state separation?
   ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
   )
 
@@ -249,7 +255,7 @@
 
 (def space "Reusable spacer view component." [:div.space.grow])
 
-(def split "Reusable resize handle component." [:div.split])
+(def split "Reusable resize handle component." [:div.split]) ; TODO use
 
 
 ;;; Simple Views - Managed components with durable state and a delegated render.
@@ -300,15 +306,27 @@
 
 (defn node
   "Component host to a managed `view` and its index data."
-  ([node-k] ; Singleton view
-   (node node-k node-k))
-  ([node-k view-k] ; Instanced view
-   (let [n @($get nodes-sub node-k)
-         v @($get views-sub view-k)]
-     (assert (= node-k (:name n)))
-     ;;(assert (= view-k (:key  v)))
-     ;; TODO run interceptors
-     [error-boundary (node* n view-k v)])))
+  [view-k]
+  (let [node-k (if (keyword? view-k)
+                 view-k
+                 @($get links-sub view-k))
+        n @($get nodes-sub node-k)
+        v @($get views-sub view-k)]
+    (assert (= node-k (:name n)))
+    ;; TODO run interceptors
+    [error-boundary (node* n view-k v)]))
+
+(defn view-index [views view-key]
+  (let [cnt (count views)]
+    (loop [i 0]
+      (let [[v k] (nth views i)]
+        (if (and #_(= v node) ; TODO doesn't account for `node` being updated at the REPL
+                 (= k view-key))
+          i
+          (let [i (inc i)]
+            (when (>= i cnt)
+              (throw (ex-info "Missing view in frame" {:frame views :view view-key})))
+            (recur i)))))))
 
 (defn view
   [k tags init v]
@@ -316,13 +334,13 @@
    {:kind ::view :name k :tags tags :init init :view v}))
 
 (defmethod node* ::view [{:keys [view]} view-key data]
-  (let [html (view data)
+  (let [html (view data view-key)
         attr (second html)]
     (if-not (map? attr)
-      (apply vector (first html) {:data-view (util/fqn view-key)} (rest html))
+      (apply vector (first html) {:data-view (util/key-of view-key)} (rest html))
       (if (contains? attr :data-view)
         html
-        (update html 1 assoc :data-view (util/fqn view-key))))))
+        (update html 1 assoc :data-view (util/key-of view-key))))))
 
 (defn frame
   [k tags elem class layout initial-views]
@@ -359,69 +377,6 @@
   [k init]
   k)
 
-(defn pane
-  [k base view]
-  ;; kinda analogue to model shaders -> where views are effect shaders, and components are system shaders.
-  ;; GOOD -> UI shaders is the next logical step
-  (register-node
-   {:kind ::pane :name k :base base :view view}))
-
-(def ^:dynamic *panel*
-  "The UI panel a view is being rendered in."
-  nil)
-
-(defmethod node* ::pane [n k v]
-  ;; TODO what really makes pane different from view here?
-  ;; - decorations & modeline handled by `dock/panel`
-  ;; - anything else is view specific, and composes from there (ie text editor isnt texture viewer isnt material editor isnt shader graph)
-  ;;
-  ;; only difference seems to be in declaration access/visibility
-  ;; - views are system components (controls), panes are asset components (editors)
-  ;; - but panes are views, whose state happen to include a selection and edit modes
-
-
-  ;; here is the wrapper view of panes, to wrap every pane with common logic/validations
-  ;; - empty selection, modeless (elden ring memes here)
-  ;; - PANE INTERCEPTORS -> start building the modal stack from here
-  ;; - its clojure data all the way down, only becoming React when not looking
-  ;;   - can transform the UI freely, turing completely, like server-side req/res middleware
-  ;; - ie "highlight current line" in text editor builds the view while "hijacking" the [text/line] component
-  ;;   - add a sub for the selected line number, got rendered line as prop, select style accordingly
-  ;;   - trivial example, most likely "selected" will be baked in, but if thats possible, anything is
-  ;; - data is easily debugged live, no need to pause the world
-
-
-  ;; actually need this indirection -> pane can change to display another selection
-  ;; - which also swaps the current modes, and therefore the associated view
-  ;; - without touching the pane itself
-  ;;
-  ;; in this regard, panels are containers of these, they handle splitting and merging and layout
-  ;; - the pane-asset association is done here -> but this is logic for `dock`
-  ;; - dont need to do much tho, and selection state is shared (not defined by dock)
-  ;; - meaning the number of selections, panes, panels and frames vary independently, and all are views
-  [:div "PANE"])
-
-;; what are selections?
-;; - not just data store assets
-;; - could be any JS object really -> so long as it has a matching mode
-;;   - turns everything into different layers of potential selection
-;;   - ie an UI editor might want to select which UI control it is editing
-;;     - drag a control from another pane onto it -> transfer ID -> edit data model -> live changes
-;;     - sprite editor -> drag button -> edit icon (or edit label if dragged onto text editor)
-;;     - same for 3d scene objects, asset files, shader nodes; this is a general indirection
-;;   - selection itself needs very little data (list of JS objects and their types)
-;;   - selection handlers (pane views, modes, or just cut/copy/paste commands & co) dispatch on type
-;;   - either default behavior or incompatible selection (ie texture dragged in text box is invalid, in address box yields asset ID)
-;;
-;; "nested" selections
-;; select "hello.txt" -> show editor pane -> select single paragraph -> display selection in another pane
-;; - unselecting with movements in the first editor will keep the selection until the other pane is closed
-;;   - could be useful to go through macroexpansions, file navigation, literate subviews, live previews etc
-
-
-;;; Contextual views -
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 ;; popup menus (same logic as main menu, but on button press or context events)
 
 ;; modal ::
@@ -452,6 +407,10 @@
   ;; pull initial state from sessionStorage, localStorage and IndexedDB?
   (js/addEventListener "click" (util/callback on-click)))
 
+
+;;; Engine Commands Integration
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (defrecord Cmd [kind name icon grp doc tags event])
 
 (defn cmd [k icon grp doc tags event]
@@ -480,6 +439,7 @@
          :else (throw (ex-info "Can't coerce view-key" {:value x})))))
 
 (def frame-key (partial view-key "data-frame"))
+(def panel-key (partial view-key "data-panel"))
 
 (defn node-of
   [state k]

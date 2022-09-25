@@ -25,4 +25,4 @@
     [:li "Live coded in a programmable programming language."]
     [:li "Unique design merging Emacs, Vim and game engines."]
     [:li "Powered by WebGPU, WebAudio, WebRTC, IndexedDB."]]
-   [:button {:data-cmd "repl.dock/split"} "Try Me"]])
+   [:button {:data-cmd "repl.dock/split-row"} "Try Me"]])

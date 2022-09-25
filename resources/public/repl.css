@@ -74,51 +74,55 @@ main.init::after {
   background-color: var(--bg-page);
 }
 
-.reflect table {
-  position: relative;
-}
-.reflect td {
-  padding: 0.15rem 0.5rem;
-}
+
+
 
 .reflect *::before,
 .reflect *::after {
   color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
-.reflect .ident.symbol::before {
-  content: "'";
-}
-.reflect .ident.keyword::before {
-  content: ":";
-}
-.reflect .ident .ns + .name::before {
-  content: "/";
+.reflect .ident.symbol::before { content: "'"; }
+.reflect .ident.keyword::before { content: ":"; }
+.reflect .ident .ns + .name::before { content: "/"; }
+
+.reflect .fn::before { content: "λ "; }
+.reflect .var::before { content: "#'"; }
+.reflect .namespace::before { content: "ns"; }
+
+.reflect td {
+  position: relative;
+  padding: 0.15rem 0.5rem;
 }
 
-.reflect .map:empty::before {
-  content: "{}";
-}
-
-.reflect .map > tr:first-of-type > td:first-of-type::before {
-  content: "{";
+.reflect .vec::before,
+.reflect .seq::before,
+.reflect .set::before,
+.reflect .map > tbody::before {
   position: absolute;
   margin-left: -0.5rem;
 }
-.reflect .map > tr:last-of-type > td:last-of-type::after {
-  content: "}";
+
+.reflect .vec::after,
+.reflect .seq::after,
+.reflect .set::after,
+.reflect .map > tbody::after {
   position: absolute;
-  margin-top: -1.5rem;
+  margin-right: -0.5rem;
   right: 0;
+  bottom: 0;
 }
 
-.reflect .fn::before {
-  content: "λ ";
+.reflect .map > tbody:empty::after {
+  bottom: initial;
 }
 
-.reflect .var::before {
-  content: "#'";
-}
-.reflect .namespace::before {
-  content: "ns";
-}
+.reflect .vec::before { content: "["; }
+.reflect .vec::after { content: "]"; }
+.reflect .seq::before { content: "("; }
+.reflect .seq::after { content: ")"; }
+.reflect .set::before { content: "#{"; }
+.reflect .set::after,
+.reflect .map > tbody::after { content: "}"; }
+.reflect .map > tbody::before { content: "{"; }

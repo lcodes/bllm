@@ -6,6 +6,7 @@
             [repl.ui   :as ui]))
 
 (defprotocol ReflectUI
+  "Coerces the value of its argument into a hiccup view."
   (reflect* [this]))
 
 (defn reflect [x]
@@ -22,7 +23,8 @@
       (reverse o)
       (recur (next xs)
              (inc n)
-             (conj o [:li {:key n} "Hi"]))))) ; TODO currently holds reactions making the whole graph recursive (add manual expand nav)
+             (conj o [:li {:key n}
+                      (reflect (first xs))])))))
 
 (defn reflect-seq [xs]
   ;; finite/infinite, head, count, pagination
@@ -53,7 +55,7 @@
    [:span.name (name x)]])
 
 (defn reflect-queue [x]
-  ;; peek front
+  ;; peek front (pop button?)
   [:div "QUEUE"])
 
 (extend-protocol ReflectUI
@@ -110,21 +112,24 @@
   TransientHashMap   (reflect* [x] (reflect-map x))
   PersistentQueue    (reflect* [x] (reflect-queue x))
 
-  Atom     (reflect* [x] [:div "Atom: "     (reflect @x) (ui/reload-btn identity #_#(swap! id inc))])
-  Volatile (reflect* [x] [:div "Volatile: " (reflect @x)]) ; TODO reload
+  ;;Atom     (reflect* [x] [:div "Atom: "     x (ui/reload-btn identity #_#(swap! id inc))])
+  ;;Volatile (reflect* [x] [:div "Volatile: " x]) ; TODO reload
 
-  reagent.ratom.RAtom    (reflect* [x] [:div "Reactive: " (reflect @x)])
-  reagent.ratom.Reaction (reflect* [x] [:div "Reaction: " (reflect @x)]))
+  ;;reagent.ratom.RAtom    (reflect* [x] [:div "Reactive: " x])
+  ;;reagent.ratom.Reaction (reflect* [x] [:div "Reaction: " x])
+  )
 
 (defn view
   [x]
   [:div.reflect.content.scroll
-   [reflect* x]])
+   [reflect* @x]])
 
 (defmethod ui/node* ::ui/schema [model state]
   ;; TODO use `state` as a bit-array of navigation states -> change updates version, version is hash, hash is signal trigger
   (view model))
 
+;; TODO cmd to reset views / `reset-mode` to auto reset specified views on figwheel reload
+;; - convenience to iterate faster -> no reload!
 
 ;; TODO debug views?
 ;; - re-frame-10x inspired timelines
