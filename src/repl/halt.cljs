@@ -16,9 +16,9 @@
 
 (defn init []
   (comment ; TODO show original stack traces in console for now
-    (set! (.-onerror js/window)               (util/callback on-window-error))
-    (js/addEventListener "error"              (util/callback on-unhandled-error))
-    (js/addEventListener "unhandledrejection" (util/callback on-unhandled-rejection))
+    (set! (.-onerror js/window)               (util/cb on-window-error))
+    (js/addEventListener "error"              (util/cb on-unhandled-error))
+    (js/addEventListener "unhandledrejection" (util/cb on-unhandled-rejection))
     ))
 
 

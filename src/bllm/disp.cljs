@@ -116,7 +116,7 @@
     (resize-viewport (find-viewport (.-target e)))))
 
 (def1 ^:private resize-observer
-  (js/ResizeObserver. (util/callback on-resize-observed)))
+  (js/ResizeObserver. (util/cb on-resize-observed)))
 
 (defn add-viewport
   "Registers a canvas as a WebGPU viewport. If pixel-ratio is positive, the
@@ -144,11 +144,16 @@
 ;;; Display System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- on-orientation-change []
+  #_TODO)
+
 (defn init []
   (setup)
-  (js/addEventListener "resize"           (util/callback on-resize))
-  (js/addEventListener "visibilitychange" (util/callback on-visibility-change))
-  (js/addEventListener "fullscreenchange" (util/callback on-fullscreen-change)))
+  (js/addEventListener "resize"           (util/cb on-resize))
+  (js/addEventListener "fullscreenchange" (util/cb on-fullscreen-change))
+  (js/addEventListener "visibilitychange" (util/cb on-visibility-change))
+  (set! (.. js/screen -orientation -onchange)
+        (util/cb on-orientation-change)))
 
 (defn start []
   (on-visibility-change)

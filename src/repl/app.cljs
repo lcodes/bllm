@@ -9,7 +9,7 @@
    [bllm.ecs  :as ecs]
    [bllm.html :as html]
    [bllm.util :as util :refer [def1]]
-   ;; Application
+   ;; Editor
    [repl.cmd  :as cmd]
    [repl.dock :as dock]
    [repl.demo :as demo]
@@ -23,11 +23,12 @@
    [bllm.load.cube]
    [bllm.load.gltf]
    [bllm.load.image]
-   ;; Application Plugins
+   ;; Editor Plugins
    [repl.browse]
    [repl.inspect]
    [repl.preview]
-   [repl.project]))
+   [repl.project]
+   [repl.tty]))
 
 (set! *warn-on-infer* true)
 
@@ -40,14 +41,13 @@
   []
   (binding [ecs/*world* game/scene]
     (try
+      ;; TODO move full tick to core -> hook ECS systems to extend
       (disp/frame tick) ; TODO frame skipping?
       (core/pre-tick)
-      ;;(demo/pre-tick)
       (core/tick)
-      ;;(demo/post-tick)
       (core/post-tick)
       (catch :default e
-        (halt/exceptional-pause e (util/callback tick))))))
+        (halt/exceptional-pause e (util/cb tick))))))
 
 (ui/deframe ^:static window
   "Root view of the UI component tree. Covers the full client area of `main`."
@@ -81,8 +81,8 @@
 (defn- post-init
   "Late initialization performed while systems are initializing asynchronously."
   []
+  (ui/init)
   (cmd/init)
-  (ui/init main)
   (let [noscript (js/document.querySelector "noscript")]
     (.removeChild (html/parent noscript) noscript)))
 

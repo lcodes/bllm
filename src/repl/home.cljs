@@ -17,12 +17,11 @@
 
 (ui/defview welcome
   []
-  [:div.welcome.content.grow
+  [:div.welcome.content
    [:h2 "Hello, World!"]
    [:p.lead "The REPL is a simulation engine in the browser."]
    [:ul
     [:li "A portable operating system for the upcoming web."]
     [:li "Live coded in a programmable programming language."]
     [:li "Unique design merging Emacs, Vim and game engines."]
-    [:li "Powered by WebGPU, WebAudio, WebRTC, IndexedDB."]]
-   [:button {:data-cmd "repl.dock/split-row"} "Try Me"]])
+    [:li "Powered by WebGPU, WebAudio, WebRTC, IndexedDB."]]])

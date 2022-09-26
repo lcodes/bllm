@@ -38,9 +38,17 @@
   []
   [:p.background-tasks 0 [:span.icon "📝"]])
 
+;; TODO context dependent views
+;; - log-message is default
+;; - definition/documentation on mouse hover
+;; - input command stack when active
+;;
+;; reuse context state at mini-bar level -> interceptor to transform bar, change css class to match context
+;; - also want "context dependence" to be reusable
+
 (ui/defview ^:static log-message
   []
-  [:p.log-message "Hello World"])
+  [:p.log-message {:data-cmd "repl.mini/focus-log"} "Hello World"])
 
 (ui/defview ^:static layout-select
   []

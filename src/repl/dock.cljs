@@ -36,6 +36,13 @@
   (js/console.log db)
   db)
 
+(ui/defview empty-pane
+  []
+  (let [n (util/random-to (.-length ui/hexa))]
+    [:div.empty
+     [:h3 (aget ui/hexa n)]
+     [:p.lead (inc n)]]))
+
 (defn- tab
   [k]
   [:li [:a {:data-cmd ""} (name k)]])
@@ -54,7 +61,7 @@
       ui/space
       [:button.more ui/more-label]])
    [:section.pane
-    [ui/node (or pane home/welcome)]] ; TODO configure default pane view
+    [ui/node (or pane empty-pane)]] ; TODO configure default pane view
    (when pane ; TODO zen mode hides, not all views need one
      [mode/line])])
 

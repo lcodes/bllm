@@ -1,17 +1,13 @@
 (ns repl.tty
-  "Text Terminal? Yuck! UI integration of the engine's CLI."
-  (:require [reagent.core :as rc]
-            [bllm.cli  :as cli]
-            [bllm.util :as util :refer [def1]]
+  "Text Terminal? Yuck! Interactive editor view over the engine's CLI."
+  (:require [bllm.util :as util]
             [repl.ui   :as ui]))
 
-(def1 defs
-  "Reactive sub over the CLI definitions."
-  (rc/atom @cli/defs))
+(set! *warn-on-infer* true)
 
-(defn init []
-  ;; TODO most likely there is a better way to link atom->ratom, this works now.
-  (add-watch cli/defs :defs (fn link-defs [_ _ _ v] (reset! defs v))))
+;; emacs eshell with literate output
+;; interactive org-mode
+;; notebook foundations?
 
 (ui/defview screen
   [k state]
@@ -20,7 +16,3 @@
   ;; User input
   ;; Data REPL inside The REPL
   [:div "TTY Screen"])
-
-(ui/defview feedback
-  [k state]
-  [:div "display the current command sequence & leader group"])

@@ -28,8 +28,8 @@
 
 (def1 defs
   "Atomic registry of all CLI knowledge. Contains maps discriminated on `:kind`.
-
   All nodes also have the following keys:
+
   `:name` is the unique resource identifier of the node as a namespaced keyword.
   `:icon` is a Unicode string used both as a text icon and a resource file name.
   `:grp` is the parent node's key. Children are indexed into `deps` for lookups.

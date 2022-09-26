@@ -141,6 +141,14 @@
       (util/return i)))
   (.-length xs))
 
+(defn random-to [n]
+  (-> (js/Math.random)
+      (* n)
+      (js/Math.floor)))
+
+(defn random-of [^js/Array coll]
+  (aget coll (random-to (.-length coll))))
+
 
 ;;; Convenience
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

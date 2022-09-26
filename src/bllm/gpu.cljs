@@ -134,9 +134,9 @@
 (defn- init-device []
   (assert device)
   ;; NOTE don't return this promise! Would hang init until the device crashes.
-  (.then (.-lost              device) (util/callback on-device-lost))
+  (.then (.-lost              device) (util/cb on-device-lost))
   ;; TODO browser has better handling for now
-  ;;(set!  (.-onuncapturederror device) (util/callback on-uncaptured-error))
+  ;;(set!  (.-onuncapturederror device) (util/cb on-uncaptured-error))
   (init-resources))
 
 ;; TODO (.destroy device) not sure there's a case for reuse yet, equivalent to F5

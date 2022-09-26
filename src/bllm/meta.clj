@@ -107,43 +107,50 @@
         rev? (:reverse m)
         dir  (if rev? dec inc)
         val? (inline-vals? elems)
-        repr (when val? (partition 2 elems))
-        view (:repr m)
-        xs (cond
-             (and val? (number? (second elems))) repr
-             (= :fourcc view) (map #(vector % (fourcc %)) elems)
-             :else (loop [elems (if repr (map first repr) elems)
-                          value (if rev? -1 0)
-                          xs    ()]
-                     (if-not elems
-                       (reverse xs)
-                       (let [x (first elems)
-                             v (if (vector? x) (second x) value)
-                             s (if (vector? x) (first  x) x)]
-                         (recur (next elems)
-                                (long (dir v))
-                                (conj xs [s v]))))))]
+        view (when val? (partition 2 elems))
+        repr (:repr m)
+        xs   (cond
+               ;; Given interleaved names and values
+               (and val? (number? (second elems))) view
+               ;; Compute the FourCC of names for their values
+               (= :fourcc repr) (map #(vector % (fourcc %)) elems)
+               ;; Generate incrementing or decrementing enum values
+               :else (loop [elems (if view (map first view) elems)
+                            value (if rev? -1 0)
+                            xs    ()]
+                       (if-not elems
+                         (reverse xs)
+                         (let [x (first elems)
+                               v (if (vector? x) (second x) value)
+                               s (if (vector? x) (first  x) x)]
+                           (recur (next elems)
+                                  (long (dir v))
+                                  (conj xs [s v]))))))
+        strs (when (or (:read m) (= :string repr))
+               (let [strs (if view
+                            (map (comp name second) view)
+                            (map (comp name first)  xs))]
+                 (if-let [prefix (some-> (:prefix m) name)] ; TODO suffix
+                   (let [offset (count prefix)]
+                     (for [s strs]
+                       (if (str/starts-with? s prefix)
+                         (subs s offset)
+                         s)))
+                   strs)))]
     `(do
        ;; Emit each enumerated element as a separate constant definition.
        ~@(map emit-const xs)
-       ;; When a representation is requested, emit a conversion function.
-       ~(when (and view (not= :fourcc view))
+       ;; When a reader is requested, emit a parser function.
+       ~(when-let [read (:read m)]
+          `(defn ~read [~'x]
+             (case ~'x
+               ~@(interleave strs (map second xs))
+               ~(:default m))))
+       ;; When a representation is requested, emit a printer function.
+       ~(when (= :string repr)
           `(defn ~sym [~'x]
              (case ~'x
-               ~@(case view
-                   ;; TODO more views?
-                   :string (let [prefix (some-> (:prefix m) name)
-                                 offset (some-> prefix count)]
-                             (util/flatten1
-                              (for [n (range (count xs))
-                                    :let [x (nth xs n)
-                                          s (name (if repr
-                                                    (second (nth repr n))
-                                                    (first x)))]]
-                                [(second x)
-                                 (if (and prefix (str/starts-with? s prefix))
-                                   (subs s offset)
-                                   s)]))))))))))
+               ~@(interleave (map second xs) strs)))))))
 
 (comment (defenum test-me {:repr :string :prefix hi-}
            hi-a hi-b hi-c))

@@ -22,14 +22,6 @@
 
 (cli/defgroup config)
 
-(def1 ^:private next-view-id (atom 0))
-
-(defn gen-view-id
-  ([]
-   (gen-view-id "view"))
-  ([prefix]
-   (str \# (util/key-of prefix) \# (swap! next-view-id inc))))
-
 
 ;;; Application Schema - Make re-frame even more declarative than it already is.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -51,6 +43,7 @@
 (util/defalias $ rf/subscribe)
 
 (defn !>
+  "Creates an event vector and dispatches it."
   ([k a]
    (! (vector k a)))
   ([k a b]
@@ -60,7 +53,18 @@
   ([k a b c d]
    (! (vector k a b c d))))
 
-(defn !event
+(defn !?
+  "Conditionally create an event vector and dispatch it with (f x) as argument
+  only when it returns a value."
+  [k f x]
+  (some->> (f x) (vector k) !))
+
+(defn event
+  "Returns an event handler invoking the preregistered handler `k` when called.
+
+  The first overload always dispatches without event data. On the other hand,
+  the second overload invokes `f` on the event, and only dispatches when it
+  returns a value. This value is then passed on to the event handler."
   ([k]
    (let [ev [k]]
      (fn dispatch [e]
@@ -68,8 +72,23 @@
        (util/prevent-default e))))
   ([k f]
    (fn dispatch [e]
-     (! [k (f e)])
+     (!? k f e)
      (util/prevent-default e))))
+
+(defn !event
+  "Adds an event listener invoking the pregistered handler `k` on changes."
+  ([^js/Node elem event-name k]
+   (.addEventListener elem event-name (event k)))
+  ([^js/Node elem event-name k f]
+   (.addEventListener elem event-name (event k f))))
+
+(defn !watch
+  "Adds an identity watch invoking the preregistered handler `k` on changes."
+  ([id k]
+   (!watch id k identity))
+  ([id k f]
+   (add-watch id k (fn watch [_ _ _ v]
+                     (!? k f v)))))
 
 (util/defalias cofx rf/inject-cofx)
 
@@ -183,13 +202,12 @@
   {:store :user} ; TODO use this to make durable and specify data store (:user delegates to session/local storage, or cloud later)
   theme :default ; TODO hardcoded -> swap css vars -> swap `style` entries -> zen garden
   style {} ; "CSS 'components' (later -> raw CSS used now)"
+  focus {} ; TODO where is the UI/dock state separation?
   popup {} ; Menus, dialogs, modals, slides, asides, notifications and other self-positioned content.
   panes {} ; View models for the opened selections; panel content & tabs index.
   views {} ; Durable view models (TODO actually implement durability)
   links {} ; Node/View relations
-  nodes {} ; UI node definitions
-  prefs {} ; "Configurable user options (opt key -> value)" ;; TODO schema here, values in `repl.state` -> decouple update frequency
-  focus {} ; TODO where is the UI/dock state separation?
+  nodes {} ; UI node definitions (TODO turning this into an AST registry -> reuse `node` for engine data views (audio/render/shader graph, CLI groups, ...))
   ;; TODO docstring syntax pattern ^ (same style as defprotocol?)
   )
 
@@ -390,25 +408,7 @@
   [:ul.menu "MENU"])
 
 
-;;; UI System
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(defn- unhandled-click [e]
-  ;; TODO beep! please dont be annoying, mostly useful to inspect clicked elem
-  )
-
-(defn- on-click [e]
-  ;; TODO modifiers for filtering, different selection modes, meta selection.
-  (if-let [cmd (html/find-attr-key e "data-cmd")]
-    (cli/call cmd e)
-    (unhandled-click e)))
-
-(defn init [app-container]
-  ;; pull initial state from sessionStorage, localStorage and IndexedDB?
-  (js/addEventListener "click" (util/callback on-click)))
-
-
-;;; Engine Commands Integration
+;;; Engine CLI Integration - Adds UI command definitions and `app-db` sync.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defrecord Cmd [kind name icon grp doc tags event])
@@ -419,9 +419,29 @@
 (defmethod cli/call* ::cmd [x args]
   (!> (:event x) args))
 
+(repl.ui/defevent ^:private sync-nodes
+  [db m]
+  (update db state merge nodes m))
+
+
+;;; UI System
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn init []
+  ;; TODO pull initial state from sessionStorage, localStorage and IndexedDB?
+  (!watch cli/defs sync-nodes))
+
 
 ;;; Misc. Components & Labels
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def1 ^:private next-view-id (atom 0))
+
+(defn gen-view-id
+  ([]
+   (gen-view-id "view"))
+  ([prefix]
+   (str \# (util/key-of prefix) \# (swap! next-view-id inc))))
 
 (defn- read-key [^string x]
   (if (= 35 (.charCodeAt x 0))

@@ -1,9 +1,12 @@
 (ns repl.cmd
-  "User interface focus navigation. From HTML5 history to interactive commands."
-  (:require [reagent.core :as rc]
+  "User interface focus navigation. From HTML5 history to interactive commands.
+
+  NOTE built on top of engine CLI commands. Using definition groups as leaders."
+  (:require [bllm.cli   :as cli]
+            [bllm.html  :as html]
             [bllm.input :as input]
             [bllm.util  :as util :refer [def1]]
-            [repl.ui    :as ui :refer [!>]]))
+            [repl.ui    :as ui   :refer [!>]]))
 
 (set! *warn-on-infer* true)
 
@@ -14,11 +17,6 @@
 ;; - command history
 ;; - panel nav history
 ;; - HTML5 history
-
-
-;; popstate idea -> 16mib per state, more than enough to serialize the full (or most of) the UI's db
-;; - very few pushstate events, therefore few needs for popstate as well (capture mouse nav too -> direct to panel nav instead)
-;; - URL is really "deeplink the entire dock" -> change when changing dock tabs!
 
 ;; entry point to app state deeplinks
 ;; - many views, each with their own nav history (like emacs windows in a frame)
@@ -33,33 +31,10 @@
 ;; - no different than sharing WoW item links in chat, or twitch/FFZ/BTTV emotes, or github commits in issues, everything is relative
 
 
-(def1 ^:private lookup (rc/atom {}))
-
- ;; Leader :: Input -> Leader | Handler
-(def1 ^:private leaders (rc/atom {}))
-
 ;; inputs can be anything; vim started when there were only keyboards, but didn't expand into gamepads and touch inputs
 ;; - anything the `input` module supports is fair game here. plug a midi keyboard and bind a command to every key
 ;;   - use chords to change modes, (ionian commands, lydian commands, mixolydian commands, etc.)
 ;;   - use text to speech and NLP (combine spoken commands with keyboard, mouse, gamepad and other inputs; audible feedback)
-
-(defn action
-  "Registers a new interactive command, or replaces an existing one."
-  []
-  )
-
-(defn leader
-  "Registers a new command prefix, or replaces an existing one."
-  []
-  )
-
-(ui/defview controls
-  []
-  [:div.options
-   [:h3 "Controls"]
-   ;; - control categories
-   ;; - commands -> key chords -> leader index
-   ])
 
 ;; configurable vim-like controls
 ;; - leader key -> command groups -> command -> emacs-like function call
@@ -69,33 +44,77 @@
 ;;     - sequences across time are the fundamental model here -> strange loops!
 ;;     - better to know 7 notes and how they compose, than 70 distinct chords
 
-;; command registry & contexts in which they can be used
-;; - no (interactive) but can do (defem) for def editor macro
-
-;; commands affecting the simulation:
-;; - system point where to run, part of that frame's inputs
-;; - inputs -> world view -> ECS events -> normal frame flow
 
 (ui/defschema state
+  focus {} ; TODO focus history?
   stack ()
-  binds {})
+  binds {}) ; TODO user-customizable keybinds, init is :kbd on cmds
 
-(ui/defeffect on-key
-  [{:keys [db]} k]
-  (let [input (get-in db [state stack])]
+(defn- unhandled-click [^js/Event e]
+  ;; TODO beep! please dont be annoying, mostly useful to inspect clicked elem
+  (js/console.warn "Undefined click at" (.-clientX e) \x (.-clientY e)
+                   "on" (.-target e) ))
 
-    ;; - either moving to a new leader context
-    ;; - or executing a command
-    {}))
+(defn- on-click [e]
+  ;; TODO modifiers for filtering, different selection modes, meta selection.
+  (if-let [cmd (html/find-attr-key e "data-cmd")]
+    (cli/call cmd e)
+    ;; TODO fallback behaviors - try to give something focus
+    (unhandled-click e)))
 
-(defn- on-pop-state [e]
-  (util/prevent-default e))
+(ui/defeffect ^:private on-key
+  [{:keys [db]} ^js/KeyboardEvent e]
+  (let [value (state db)
+        input (stack value)
+        table (or (first input) (binds value))
+        cmd   (get table (.-code e))]
+    ;; resolve modifiers on cmd? or resolve modifiers first, then cmd in that? (later)
+    (if-not cmd
+      (js/console.warn (.-code e) "is undefined" e)
+    ;; - execute command (effect! -> rswap! result back into app-db -> UI render -> repeat with next `on-key`)
+    ;;   - either moving to a new leader context
+    ;;   - async load UI when given a promise
+    ;;   - close feedback pane if nil
+      )))
+
+(comment
+  (.pushState js/history nil nil "#/ohhi2"))
+
+(ui/defevent ^:private on-pop-state
+  [db pop]
+  ;; check input state, delegate to:
+  ;; - ignore if just removing history noise from cmd input stack
+  ;; - `cmd-back` if a cmd stack exists, and `pop` state is leaf input key
+  ;; - cancel cmd stack if one exists -> user is navigating somewhere else (fixup history accordingly)
+  ;; - dispatch to custom cmd if state is {"cmd" "name"}
+  ;; - otherwise dispatch to default behavior -> use hash as a dock space key
+  (js/console.log "POP" pop)
+  db)
+
+(def ^:private dispatch
+  "Input handler forwarding to UI focus and HTML elements."
+  (input/handler-up ::dispatch
+                    (util/cb on-key)
+                    (util/cb on-click)))
 
 (defn init []
-  (js/addEventListener "popstate" (util/callback on-pop-state))
-  #_
-  (doto ^object (.-body js/document)
-    (.addEventListener "keydown" (ui/!event on-key identity))))
+  (input/enable! dispatch)
+  (ui/!event js/window "popstate" on-pop-state
+             (fn get-state [^js/PopStateEvent e]
+               (or (.-state e) :empty))))
+
+(ui/defview controls
+  []
+  [:div.options
+   [:h3 "Controls"]
+   ;; - control categories
+   ;; - commands -> key chords -> leader index
+   ])
+
+(ui/defview feedback
+  [k state]
+  [:div "display the current command sequence & leader group"])
+
 
 (comment
   (defcmd leader

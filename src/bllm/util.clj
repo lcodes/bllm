@@ -310,15 +310,18 @@
   [o f]
   `(.. ~o ~(symbol (str "-" f)) (~'bind ~o)))
 
-(defmacro callback
+(defmacro cb
   "A better `#'`, for lack of a better word. Allows development builds to redefine
   `f` without having to re-register its callbacks. Does nothing in release."
   [f]
   (if-not (dev?)
     f
-    `#(.apply ~(func-t f)
-              js/undefined
-              (js/Array.prototype.slice.call (cljs.core/js-arguments)))))
+    `(fn ~(if-not (symbol? f)
+           'cb
+           (symbol (str f "-cb")))
+       []
+       (.apply ~(func-t f) js/undefined
+               (js/Array.prototype.slice.call (cljs.core/js-arguments))))))
 
 (defmacro defer
   [& fn-args]
@@ -379,13 +382,21 @@
            (let [~var-name (.-value result#)]
              ~@body))))))
 
-(defmacro dorange
-  [[i from to] & body]
+(defn- emit-dorange
+  [dir end i from to body]
   `(let [to# ~to]
      (loop [~i ~from]
-       (when (< ~i to#)
+       (when (~end ~i to#)
          ~@body
-         (recur (inc ~i))))))
+         (recur (~dir ~i))))))
+
+(defmacro dorange
+  [[i from to] & body]
+  (emit-dorange 'inc '< i from to body))
+
+(defmacro dorange<
+  [[i from to] & body]
+  (emit-dorange 'dec '>= i `(dec ~from) to body))
 
 (defmacro dolist
   "No overhead `doseq` specialized to a DOM `List` interface."
