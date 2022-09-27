@@ -50,18 +50,7 @@
   stack ()
   binds {}) ; TODO user-customizable keybinds, init is :kbd on cmds
 
-(defn- unhandled-click [^js/Event e]
-  ;; TODO beep! please dont be annoying, mostly useful to inspect clicked elem
-  (js/console.warn "Undefined click at" (.-clientX e) \x (.-clientY e)
-                   "on" (.-target e) ))
-
-(defn- on-click [e]
-  ;; TODO modifiers for filtering, different selection modes, meta selection.
-  (if-let [cmd (html/find-attr-key e "data-cmd")]
-    (cli/call cmd e)
-    ;; TODO fallback behaviors - try to give something focus
-    (unhandled-click e)))
-
+#_
 (ui/defeffect ^:private on-key
   [{:keys [db]} ^js/KeyboardEvent e]
   (let [value (state db)
@@ -76,6 +65,19 @@
     ;;   - async load UI when given a promise
     ;;   - close feedback pane if nil
       )))
+
+(defn on-key [k]
+  (js/console.log (input/keys k))
+  #_true)
+
+(defn- on-click [_ e]
+  ;; TODO modifiers for filtering, different selection modes, meta selection.
+  (when-let [cmd (html/find-attr-key e "data-cmd")]
+    (let [ret (cli/call cmd e)]
+      ;; TODO dispatch ret
+      true)
+    ;; TODO fallback behaviors - try to give something focus
+    ))
 
 (comment
   (.pushState js/history nil nil "#/ohhi2"))
@@ -93,9 +95,9 @@
 
 (def ^:private dispatch
   "Input handler forwarding to UI focus and HTML elements."
-  (input/handler-up ::dispatch
-                    (util/cb on-key)
-                    (util/cb on-click)))
+  (input/handler-simple ::dispatch
+                        (util/cb on-key)
+                        (util/cb on-click)))
 
 (defn init []
   (input/enable! dispatch)

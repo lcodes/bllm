@@ -6,21 +6,11 @@
 
 (set! *warn-on-infer* true)
 
-
+;; TODO devices (when adding gamepads & others)
 ;; 0=keyboard, 1=mouse, 2+ = connected gamepads, remote controls, playback timelines, etc
 
 ;; DEVICE ID + KEY = discrete input
 ;; DEVICE ID + VAR = continuous input
-
-;; TODO input here is tick based
-;; high level often wants single events
-
-;; capture inputs -> routing -> engine / editor handlers -> tick batches / event dispatch
-
-;; tick loop can be paused (ie on error), still want inputs coming through
-
-;; what about using commands directly?
-;; - simulation inputs get batched every frame (command just writes to a chunk)
 
 
 ;;; Input Context
@@ -34,6 +24,8 @@
 (def1 ^:private stack     #js [])
 (def1 ^:private stack-top 0)
 
+(comment (js/console.log stack))
+
 (defn register!
   "Development only. Replaces a redefined handler in the current `stack`."
   [^Handler h]
@@ -42,11 +34,11 @@
     (when (= (.-id h) (.-id x))
       (set! (.-enabled-at h) n)
       (aset stack n h)
-      (util/return))))
+      (util/return h)))
+  h)
 
-(defn handler-up [id key-up mouse-up]
-  (doto (->Handler id -1 nil key-up nil mouse-up nil nil)
-    (register!)))
+(defn handler-simple [id key-down mouse-up]
+  (register! (->Handler id -1 key-down nil nil mouse-up nil nil)))
 
 (defn enable! [^Handler h]
   (when (neg? (.-enabled-at h))
@@ -62,11 +54,11 @@
       (when (< n stack-top)
         (.splice stack n 1)))))
 
-(defn dispatch [get-fn e]
+(defn- dispatch [get-fn e x]
   (try
     (util/dorange< [n stack-top 0]
       (when-let [f (get-fn (aget stack n))]
-        (when (f e)
+        (when (f x e)
           (util/prevent-default e)
           (util/return))))
     (catch :default e
@@ -102,26 +94,59 @@
   ContextMenu Power Sleep BrowserSearch BrowserFavorites BrowserRefresh
   BrowserStop BrowserForward BrowserBack LaunchApp1 LaunchMail MediaSelect
   ;; Translated from mouse inputs, to dispatch again as keys.
-  ClickLeft ClickMiddle ClickRight WheelUp WheelDown WheelLeft WheelRight
-  ClickPrev ClickNext
+  ClickLeft ClickMiddle ClickRight ClickPrev ClickNext
+  WheelUp WheelDown WheelLeft WheelRight
   ;; Translated from gamepad inputs, to dispatch as keys.
   key-max)
 
-(def ^:private on-key-down (partial dispatch (fn [^Handler h] (.-key-down h))))
-(def ^:private on-key-up   (partial dispatch (fn [^Handler h] (.-key-up   h))))
+(defn- on-key [get-fn]
+  (fn handler [^js/KeyboardEvent e]
+    (->> e .-code ->key (dispatch get-fn e))))
+
+(defn- key-down [^Handler h] (.-key-down h))
+(defn- key-up   [^Handler h] (.-key-up   h))
+
+(def ^:private on-key-down (on-key key-down))
+(def ^:private on-key-up   (on-key key-up))
 
 
 ;;; Mouse & Touch
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(def ^:private on-mouse-wheel (partial dispatch (fn [^Handler h] (.-mouse-wheel h))))
-(def ^:private on-mouse-move  (partial dispatch (fn [^Handler h] (.-mouse-move  h))))
-(def ^:private on-mouse-down  (partial dispatch (fn [^Handler h] (.-mouse-down  h))))
-(def ^:private on-mouse-up    (partial dispatch (fn [^Handler h] (.-mouse-up    h))))
+(defn- on-mouse-wheel [^js/WheelEvent e]
+  (dispatch (fn wheel [^Handler h] (.-mouse-wheel h)) e
+            (cond (pos? (.-deltaY e)) WheelDown
+                  (neg? (.-deltaY e)) WheelUp
+                  (pos? (.-deltaX e)) WheelLeft
+                  (neg? (.-deltaX e)) WheelRight
+                  :else               Unidentified))) ; wheel Usage!
+
+(defn- on-mouse-btn [get-fn]
+  (fn handler [^js/MouseEvent e]
+    (dispatch get-fn e (+ ClickLeft (.-button e)))))
+
+(def ^:private on-mouse-down (on-mouse-btn (fn [^Handler h] (.-mouse-down  h))))
+(def ^:private on-mouse-up   (on-mouse-btn (fn [^Handler h] (.-mouse-up    h))))
+
+(defn- route [get-fn]
+  (fn handler [x e]
+    (dispatch get-fn e x)))
+
+(def ^:private route-mouse-down  (route key-down))
+(def ^:private route-mouse-up    (route key-up))
+(def ^:private route-mouse-wheel (route key-up)) ; TODO or key-down? or both?
+
+(def ^:private on-mouse-move
+  (partial dispatch (fn [^Handler h] (.-mouse-move h))))
 
 
 ;;; Gamepads
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; problem here: need to poll gamepads, but tick loop can be disabled
+;; - still want gamepads to drive UI inputs & dispatch commands
+;; - stack of game loops? fallback to "lesser" one when the top one "crashes"
+;; - need to refactor core loop into ecs systems anyways
 
 (defn- on-gamepad-connected [^js/GamepadEvent e]
   (js/console.log e))
@@ -133,7 +158,17 @@
 ;;; Input System
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(def ^:private system
+  "Route unhandled mouse buttons to the equivalent keys."
+  (register! (->Handler ::system -1
+                        nil nil
+                        (util/cb route-mouse-down)
+                        (util/cb route-mouse-up)
+                        nil
+                        (util/cb route-mouse-wheel))))
+
 (defn init []
+  (enable! system)
   (js/addEventListener "keydown"   (util/cb on-key-down))
   (js/addEventListener "keyup"     (util/cb on-key-up))
   (js/addEventListener "wheel"     (util/cb on-mouse-wheel))
