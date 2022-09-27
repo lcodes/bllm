@@ -15,6 +15,7 @@
 ;; NOTE using more idiomatic ClojureScript here. This data is directly consumed
 ;; by the REPL UI, and doesn't need to be as high-performance as other systems.
 
+;; TODO split generic "ast" node (kind name icon grp doc tags) from specific fields
 (defrecord Group [kind name icon grp doc tags])
 (defrecord CVar  [kind name icon grp doc tags get set])
 (defrecord Cmd   [kind name icon grp doc tags action])
@@ -55,7 +56,7 @@
 (defn call
   "Runs the CLI object associated with the given key against the given args.
 
-  NOTE Args can be either positional [1 2 3] or named {:a 1 :b 2 :c 3}."
+  NOTE Args can be either positional [1 2 3] or named {:a 1 :b 2 :c 3}." ; TODO make it work -> need args meta -> later
   [k args]
   (if-let [x (@defs k)]
     (call* x args)

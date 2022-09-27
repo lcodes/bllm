@@ -51,7 +51,7 @@
          align  0
          offset 0
          output ()]
-    (if-not fields
+    (if (empty? fields)
       (with-meta (reverse output) {::align align ::size offset})
       (let [field   (first   fields)
             sym     (first   field)
@@ -158,10 +158,13 @@
 (defm defflag
   "Packs one or more boolean attributes into an unsigned int."
   [sym & elems]
+  ;; TODO conversion functions (bit -> name, name -> bit :: reuse defenum impl)
   `(do ~@(if (inline-vals? elems)
            (map emit-const (partition 2 elems))
            (loop [elems elems
-                  bit   1
+                  bit   (if-let [n (:from (meta sym))]
+                          (bit-shift-left 1 n)
+                          1)
                   xs    ()]
              (if-not elems
                (reverse xs)
@@ -170,14 +173,34 @@
                         (long (bit-shift-left bit 1))
                         (conj xs (emit-const x bit)))))))))
 
-(defmacro defbits
+(defm defbits
   "Packs one or more integer attributes into a unsigned int."
-  [& args]
-  ;; how many bits total
-  ;; how many bits per elem
-  ;; pack function (elem... -> num)
-  ;; unpack functions (num -> elem)
-  )
+  [sym & elems]
+  (when (or (> 2  (count elems))
+            (odd? (count elems)))
+    (throw (Exception. "Invalid number of elements")))
+  (let [bits (loop [xs elems
+                    n  0
+                    o  ()]
+               (if-not xs
+                 (if (> n 32)
+                   (throw (ex-info "Too many bits" {:bits n}))
+                   (reverse o))
+                 (let [bits (second xs)]
+                   (recur (nnext xs)
+                          (+ n bits)
+                          (conj o [(first xs) (dec (bit-shift-left 1 bits)) n])))))]
+    ;; TODO meta for packed type? ie could fit in u8, u16 or u32 - no u64 in JS
+    `(do ~(when-not (:transient (meta sym))
+            `(defn ~sym ~(mapv first bits)
+               ~@(for [[elem mask] bits]
+                   `(assert (>= ~mask ~elem)))
+               (bit-or ~@(for [[elem mask shift] bits]
+                           `(bit-shift-left ~elem ~shift)))))
+         ~@(for [[elem mask shift] bits]
+             (when-not (:transient (meta elem))
+               `(defn ~elem [~sym]
+                  (bit-and ~mask (unsigned-bit-shift-right ~sym ~shift))))))))
 
 (defm defstruct
   [sym & fields]

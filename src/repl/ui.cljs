@@ -87,7 +87,9 @@
   ([id k]
    (!watch id k identity))
   ([id k f]
+   (!? k f @id)
    (add-watch id k (fn watch [_ _ _ v]
+                     ;; TODO defer to frame boundaries -> fires too often already
                      (!? k f v)))))
 
 (util/defalias cofx rf/inject-cofx)
@@ -421,7 +423,7 @@
 
 (repl.ui/defevent ^:private sync-nodes
   [db m]
-  (update db state merge nodes m))
+  (update db state update nodes merge m))
 
 
 ;;; UI System

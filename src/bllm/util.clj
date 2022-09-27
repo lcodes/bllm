@@ -185,6 +185,22 @@
      (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
      h)))
 
+(defn small-id
+  ([sym]
+   (small-id (str *ns*) (name sym)))
+  ([ns sym]
+   (let [h (unique-id ns sym)] ; Poor man's 16-bit ID. Might collide, who knows. FIXME works for now
+     (bit-and 0xffff (bit-xor h (unsigned-bit-shift-right h 16))))))
+
+(defn js-array [xs]
+  (if (empty? xs)
+    'bllm.util/empty-array
+    `(cljs.core/array ~@xs)))
+
+(defn scalar|js-array [m k-scalar k-array]
+  (or (get m k-scalar)
+      (js-array (get m k-array))))
+
 
 ;;; Conditional Compilation -> Matching the different build profiles.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

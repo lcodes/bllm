@@ -1,13 +1,6 @@
 (ns bllm.data
   (:require [bllm.util :as util :refer [defm]]))
 
-(defn- scalar|js-array [m k-scalar k-array]
-  (or (get m k-scalar)
-      (let [xs (get m k-array)]
-        (if (empty? xs)
-          'bllm.util/empty-array
-          `(cljs.core/array ~@xs)))))
-
 (defn- fetch-tag [sym]
   (case sym
     data 'js/ArrayBuffer
@@ -36,8 +29,8 @@
          (bllm.data/importer
           ~(util/unique-id sym)
           ~(name sym)
-          ~(scalar|js-array m :extension  :extensions)
-          ~(scalar|js-array m :media-type :media-types)
+          ~(util/scalar|js-array m :extension  :extensions)
+          ~(util/scalar|js-array m :media-type :media-types)
           ~(fetch-type fetch)
           ~sym))))
 

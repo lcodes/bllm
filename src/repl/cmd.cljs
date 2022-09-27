@@ -68,7 +68,7 @@
 
 (defn on-key [k]
   (js/console.log (input/keys k))
-  #_true)
+  true)
 
 (defn- on-click [_ e]
   ;; TODO modifiers for filtering, different selection modes, meta selection.

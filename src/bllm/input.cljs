@@ -175,6 +175,7 @@
   (js/addEventListener "mousemove" (util/cb on-mouse-move))
   (js/addEventListener "mousedown" (util/cb on-mouse-down))
   (js/addEventListener "mouseup"   (util/cb on-mouse-up))
+  (js/addEventListener "contextmenu" util/prevent-default)
   (js/addEventListener "gamepadconnected"    (util/cb on-gamepad-connected))
   (js/addEventListener "gamepaddisconnected" (util/cb on-gamepad-disconnected)))
 

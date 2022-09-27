@@ -141,6 +141,15 @@
       (util/return i)))
   (.-length xs))
 
+(defn get-or-new
+  "Uses `ctor` to create `k` in `m` if doesn't exist, then return it."
+  [^js/Map m k ctor]
+  (if-let [v (.get m k)]
+    v
+    (let [v (new ctor)]
+      (.set m k v)
+      v)))
+
 (defn random-to [n]
   (-> (js/Math.random)
       (* n)
