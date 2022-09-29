@@ -11,7 +11,9 @@
   [sym]
   (let [{:keys [icon group doc tags]} (meta sym)]
     `(def ~sym (bllm.cli/group ~(keyword (str *ns*)) ~icon
-                               ~(or group ::root) ~doc ~tags))))
+                               ~(or group ::root)
+                               ~(or doc (:doc (:ns &env)))
+                               ~tags))))
 
 (defn- group-or-ns
   [env g]

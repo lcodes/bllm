@@ -9,6 +9,7 @@
         ast (meta/parse-struct &env fields)]
     `(do (def ~sym (fn ~'TODO [])) ; wrapper type (need defclass to generate getter/setter fields)
          (bllm.ecs/component
+          ~(util/unique-hash sym fields m)
           (bit-or ~(util/small-id sym)
                   0)
           ~sym
@@ -17,5 +18,5 @@
 
 (defm defsys
   [sym & args]
-  `(defn ~sym []
-     ))
+  `(def ~sym
+     nil))

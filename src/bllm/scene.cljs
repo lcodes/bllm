@@ -1,4 +1,5 @@
 (ns bllm.scene
+  "Scene management."
   (:require [bllm.ecs :as ecs]))
 
 (ecs/defc World

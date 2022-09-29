@@ -8,7 +8,7 @@
 (def1 unscaled-delta 0)
 
 (defn pre-tick []
-  (util/inc! frame-number)
+  (util/++ frame-number)
   (let [time (js/performance.now)]
     (set! unscaled-delta (- time unscaled-now))
     (set! unscaled-now time))

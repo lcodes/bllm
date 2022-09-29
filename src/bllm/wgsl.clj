@@ -20,13 +20,6 @@
 ;;; Utilities
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- gpu-hash
-  "Generates a unique hash for a WGSL shader node definition."
-  [& args]
-  (hash args)) ; Why is this so easy?
-
-(comment (gpu-hash 1 "hi" :key 'sym))
-
 (defn- emit-field
   [{:keys [name type offset]}]
   (list 'bllm.wgsl/field
@@ -48,7 +41,7 @@
   "Emits a WGSL node definition and its registration to the shader graph."
   [& {:keys [sym expr wgsl hash kind deps args]}]
   (let [uuid (util/unique-id sym)
-        hash (or  hash (gpu-hash args))
+        hash (or  hash (util/unique-hash args))
         name (and wgsl (util/unique-name sym))
         sym  (cond-> (vary-meta sym assoc ::kind kind ::uuid uuid ::hash hash)
                wgsl (vary-meta assoc ::name name)
@@ -1107,7 +1100,7 @@
                   (assoc &env :locals))] ; Make args visible to cljs' analyzer
     (->> (fn link [deps code wgsl]
                     ;; TODO type inference on let bindings -> ret
-                    (with-deps deps (gpu-hash args|ret body)
+                    (with-deps deps (util/unique-hash args|ret body)
                       {:wgsl wgsl
                        :ret  (util/keyword->gpu (or ret :f32)) ;; TODO default to type inference
                        :args `(cljs.core/array
@@ -1176,7 +1169,7 @@
                                                             :compute :in))]
                   (-> #(ids (::uuid %))
                       (remove deps)
-                      (with-deps (gpu-hash x y z body)
+                      (with-deps (util/unique-hash x y z body)
                         {:in (gen-io ids) :x x :y y :z z :wgsl wgsl}))))))
 
 ;; TODO step between compile and link -> validation!
@@ -1190,7 +1183,7 @@
                          (or (ids-i id)
                              (ids-o id)))
                       (remove deps)
-                      (with-deps (gpu-hash body)
+                      (with-deps (util/unique-hash body)
                         {:wgsl wgsl
                          :in   (gen-io ids-i)
                          :out  (gen-io ids-o)}))))))

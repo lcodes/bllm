@@ -23,8 +23,9 @@
              (if (vector? init) (count init) init))
            (elem-size [ty dim] ; Size of a single typed array.
              (* dim (case ty
-                      :u8  1
-                      :f32 4)))
+                      (:u8)  1
+                      (:u32
+                       :f32) 4)))
            (calc-size [total-sz [_ ty init]] ; Accumulator for the buffer size.
              (+ total-sz (elem-size ty (elem-dim init))))
            (defscratch [& vars] ; Compiler for our little one-use DSL.
@@ -40,6 +41,7 @@
                               size (elem-size ty dim)
                               ctor (case ty
                                      :u8  'js/Uint8Array
+                                     :u32 'js/Uint32Array
                                      :f32 'js/Float32Array)]
                           (recur (next vars)
                                  (+ ofs ^long size)
@@ -51,16 +53,17 @@
                                                   `(aset ~'v ~n ~(nth init n))))
                                             ~'v))))))))))]
   (defscratch ; Just to make this last bit trivial to extend in the future.
-    [unit-x+ :f32 [ 1  0  0 1] "Unit X+ axis."]
-    [unit-y+ :f32 [ 0  1  0 1] "Unit Y+ axis."]
-    [unit-z+ :f32 [ 0  0  1 1] "Unit Z+ axis."]
-    [unit-x- :f32 [-1  0  0 1] "Unit X- axis."]
-    [unit-y- :f32 [ 0 -1  0 1] "Unit Y- axis."]
-    [unit-z- :f32 [ 0  0 -1 1] "Unit Z- axis."]
-    [bytes   :u8  64 "Short-lived byte-array."]
-    [scratch :f32 16 "Short-lived matrix-sized float array."]
-    [temp-a  :f32 16 "Register-like matrix-sized float array."]
-    [temp-b  :f32 16 "Register-like matrix-sized float array."]))
+    [unit-x+  :f32 [ 1  0  0 1] "Unit X+ axis."]
+    [unit-y+  :f32 [ 0  1  0 1] "Unit Y+ axis."]
+    [unit-z+  :f32 [ 0  0  1 1] "Unit Z+ axis."]
+    [unit-x-  :f32 [-1  0  0 1] "Unit X- axis."]
+    [unit-y-  :f32 [ 0 -1  0 1] "Unit Y- axis."]
+    [unit-z-  :f32 [ 0  0 -1 1] "Unit Z- axis."]
+    [bytes    :u8  64 "Short-lived byte-array."]
+    [temp-u32 :u32 1  "Short-lived u32 singleton."]
+    [temp-a   :f32 16 "Short-lived matrix-sized float array."]
+    [temp-b   :f32 16 "Short-lived matrix-sized float array."]
+    [scratch  :f32 16 "Short-lived matrix-sized float array."]))
 
 (macrolet [(gen-arrays [] (range (inc 16)))
            (defstore [sym]
@@ -111,6 +114,10 @@
 
 (defn ^js/Uint32Array bit-array [size]
   (-> size (+ 31) (/ 32) js/Math.floor js/Uint32Array.))
+
+(defn bit-array-clear [bit-array n]
+  ;; TODO
+  )
 
 
 ;;; Micro Logger

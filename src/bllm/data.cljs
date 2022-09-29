@@ -262,7 +262,7 @@
 (defn pre-tick []
   (when (and conn (pos? (.-size dirty-stores)))
     ;; TODO move new requests to fresh queue, wait for existing requests to complete
-    (util/inc! version)
+    (util/++ version)
     (-> (open) (.then finish-refresh)))) ; TODO (.catch generic-error-handler)
 
 ;; dont care about scenes or specific file formats here

@@ -169,13 +169,27 @@
   ;;loop   :bool
   )
 
-#_
+(ecs/defc Crossfade
+  "One node's loss is another node's `Gain`."
+  )
+
+(ecs/defsys Service
+  ""
+  ;; queries:
+  ;; - recycle stopped sounds
+  ;; - process playback events (play/pause/stop/fade/etc)
+  )
+
 (ecs/defc Panner
-  {:require [scene/LocalToWorld]} ; TODO mechanism to only run system if transforms were updated (small buckets -> easier put to sleep)
-  _ js/PannerNode)
+  {:type js/PannerNode
+   :in [scene/World]})
+
+(ecs/defsys Spatial
+  "Synchronizes all WebAudio `Panner` nodes with the transform of their entity."
+  ;; TODO mechanism to only run system if inputs were updated (small buckets -> easier put to sleep)
+  ;; - version data blocks & queries, run if mismatch (few bits, small max version, cycle through)
+  )
 
 ;; action components for change events
 ;; - deterministic input, batches between ECS phases, flushed at specific points
-
-#_
-(ecs/defevent play :target Sound)
+#_(ecs/defevent play :target Sound)

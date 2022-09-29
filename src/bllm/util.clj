@@ -168,6 +168,11 @@
         (str/replace \. \_)
         (str "__"))))
 
+(defn unique-hash
+  "Generates a unique hash from its inputs."
+  [& args]
+  (hash args))
+
 (defn unique-name
   "Expands a `Symbol` into a camelCase fully__qualified identifier."
   [sym]
@@ -302,14 +307,16 @@
 ;;; DWIM -> Direct access to JavaScript's good parts, or "I know what I'm doing"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defmacro ===  [x y]  (bool-t `(~'js* "~{} === ~{}" ~x ~y)))
-(defmacro !==  [x y]  (bool-t `(~'js* "~{} !== ~{}" ~x ~y)))
-(defmacro &&   [& xs] (binop " && " ~xs))
-(defmacro ||   [& xs] (binop " || " ~xs))
-(defmacro %    [x y]  `(~'js* "~{} % ~{}"  ~x ~y))
-(defmacro +=   [x y]  `(~'js* "~{} += ~{}" ~x ~y))
-(defmacro inc! [x]    `(~'js* "~{}++" ~x))
-(defmacro dec! [x]    `(~'js* "~{}--" ~x))
+(defmacro === [x y]  (bool-t `(~'js* "~{} === ~{}" ~x ~y)))
+(defmacro !== [x y]  (bool-t `(~'js* "~{} !== ~{}" ~x ~y)))
+(defmacro &&  [& xs] (binop " && " ~xs))
+(defmacro ||  [& xs] (binop " || " ~xs))
+(defmacro %   [x y]  `(~'js* "~{} % ~{}"  ~x ~y))
+(defmacro +=  [x y]  `(~'js* "~{} += ~{}" ~x ~y))
+(defmacro -=  [x y]  `(~'js* "~{} -= ~{}" ~x ~y))
+(defmacro |=  [x y]  `(~'js* "~{} |= ~{}" ~x ~y))
+(defmacro ++  [x]    `(~'js* "~{}++" ~x))
+(defmacro --  [x]    `(~'js* "~{}--" ~x))
 
 (defmacro str! [s & xs]
   `(~'js* ~(str "~{} += " (binop* " + " xs)) ~s ~@xs))
@@ -377,7 +384,7 @@
            ~@(when n [n 0])]
        (~'js* "for (let ~{} of ~{}) {" ~x ~(last binding))
        ~@body
-       ~(when n `(bllm.util/inc! ~n))
+       ~(when n `(bllm.util/++ ~n))
        (~'js* "}")
        js/undefined)))
 

@@ -44,7 +44,7 @@
   (when (neg? (.-enabled-at h))
     (set! (.-enabled-at h) stack-top)
     (aset stack stack-top h)
-    (util/inc! stack-top)))
+    (util/++ stack-top)))
 
 (defn disable! [^Handler h]
   (let [n (.-enabled-at h)]

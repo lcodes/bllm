@@ -2,7 +2,8 @@
   "Frame drawing script."
   (:require [bllm.cull :as cull]
             [bllm.gpu  :as gpu]
-            [bllm.pass :as pass]))
+            [bllm.pass :as pass]
+            [bllm.view :as view]))
 
 (gpu/defres ^:dynamic *enc*
   :group (gpu/command-encoder "draw"))
