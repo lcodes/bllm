@@ -190,13 +190,6 @@
      (assert (or (< h 0) (>= h 32))) ; Reserved ID range for primitive types.
      h)))
 
-(defn small-id
-  ([sym]
-   (small-id (str *ns*) (name sym)))
-  ([ns sym]
-   (let [h (unique-id ns sym)] ; Poor man's 16-bit ID. Might collide, who knows. FIXME works for now
-     (bit-and 0xffff (bit-xor h (unsigned-bit-shift-right h 16))))))
-
 (defn js-array [xs]
   (if (empty? xs)
     'bllm.util/empty-array
@@ -205,6 +198,11 @@
 (defn scalar|js-array [m k-scalar k-array]
   (or (get m k-scalar)
       (js-array (get m k-array))))
+
+(defn u16-array [xs]
+  (if (empty? xs)
+    'bllm.util/null-u16
+    `(js/Uint16Array. (cljs.core/array ~@xs)))) ; TODO utils to avoid temp array
 
 
 ;;; Conditional Compilation -> Matching the different build profiles.
@@ -277,6 +275,19 @@
   (if (dev?)
     `(defonce ~sym ~init)
     `(def ~sym ~init))) ; Advanced compilation doesn't fully remove `defonce`.
+
+(defn js-ident [s]
+  (if (cljs.analyzer/js-reserved s)
+    (str s \$)
+    s))
+
+(defm defn*
+  "Like `defn`. Allows JavaScript's variadic `arguments` over one expression."
+  [sym params expr]
+  `(def ~(vary-meta sym assoc :arglists `([~@params & ~'*]))
+     (~'js* ~(str "(function " (js-ident (name sym)) "(" ; TODO ns-qualified?
+                  (str/join "," params)
+                  ") { return ~{} })") ~expr)))
 
 (defn pp
   "Development helper to pretty print to string."

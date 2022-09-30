@@ -188,7 +188,7 @@
                    (reverse o))
                  (let [bits (second xs)]
                    (recur (nnext xs)
-                          (+ n bits)
+                          (long (+ n bits))
                           (conj o [(first xs) (dec (bit-shift-left 1 bits)) n])))))]
     ;; TODO meta for packed type? ie could fit in u8, u16 or u32 - no u64 in JS
     `(do ~(when-not (:transient (meta sym))

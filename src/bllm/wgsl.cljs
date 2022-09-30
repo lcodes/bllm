@@ -524,7 +524,7 @@
 
 (defn- release-module [mod-id]
   (when-let [mod (.get mods mod-id)]
-    (util/dec! mod.refs)
+    (util/-- mod.refs)
     (when (zero? mod.refs)
       (.delete mods mod-id))))
 

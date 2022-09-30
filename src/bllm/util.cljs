@@ -1,7 +1,7 @@
 (ns bllm.util
-  (:refer-clojure :exclude [array bytes])
+  (:refer-clojure :exclude [array])
   (:require-macros [clojure.tools.macro :refer [macrolet]]
-                   [bllm.util :as util]))
+                   [bllm.util :as util :refer [%]]))
 
 (set! *warn-on-infer* true)
 
@@ -24,6 +24,7 @@
            (elem-size [ty dim] ; Size of a single typed array.
              (* dim (case ty
                       (:u8)  1
+                      (:u16) 2
                       (:u32
                        :f32) 4)))
            (calc-size [total-sz [_ ty init]] ; Accumulator for the buffer size.
@@ -41,6 +42,7 @@
                               size (elem-size ty dim)
                               ctor (case ty
                                      :u8  'js/Uint8Array
+                                     :u16 'js/Uint16Array
                                      :u32 'js/Uint32Array
                                      :f32 'js/Float32Array)]
                           (recur (next vars)
@@ -53,17 +55,20 @@
                                                   `(aset ~'v ~n ~(nth init n))))
                                             ~'v))))))))))]
   (defscratch ; Just to make this last bit trivial to extend in the future.
-    [unit-x+  :f32 [ 1  0  0 1] "Unit X+ axis."]
-    [unit-y+  :f32 [ 0  1  0 1] "Unit Y+ axis."]
-    [unit-z+  :f32 [ 0  0  1 1] "Unit Z+ axis."]
-    [unit-x-  :f32 [-1  0  0 1] "Unit X- axis."]
-    [unit-y-  :f32 [ 0 -1  0 1] "Unit Y- axis."]
-    [unit-z-  :f32 [ 0  0 -1 1] "Unit Z- axis."]
-    [bytes    :u8  64 "Short-lived byte-array."]
-    [temp-u32 :u32 1  "Short-lived u32 singleton."]
+    [null-u16 :u16 0  "Empty u16 array."]
+    [unit-u32 :u32 1  "Singleton u32 array."]
+    [temp-u8  :u8  64 "Short-lived byte-array."]
+    [temp-u16 :u16 64 "Short-lived u16 array."]
+    [temp-u32 :u32 64 "Short-lived u32 array."]
     [temp-a   :f32 16 "Short-lived matrix-sized float array."]
     [temp-b   :f32 16 "Short-lived matrix-sized float array."]
-    [scratch  :f32 16 "Short-lived matrix-sized float array."]))
+    [scratch  :f32 16 "Short-lived matrix-sized float array."]
+    [axis-x+  :f32 [ 1  0  0 1] "Unit X+ axis."]
+    [axis-y+  :f32 [ 0  1  0 1] "Unit Y+ axis."]
+    [axis-z+  :f32 [ 0  0  1 1] "Unit Z+ axis."]
+    [axis-x-  :f32 [-1  0  0 1] "Unit X- axis."]
+    [axis-y-  :f32 [ 0 -1  0 1] "Unit Y- axis."]
+    [axis-z-  :f32 [ 0  0 -1 1] "Unit Z- axis."]))
 
 (macrolet [(gen-arrays [] (range (inc 16)))
            (defstore [sym]
@@ -112,12 +117,19 @@
   (util/doarray [x i src]
     (aset dst i x)))
 
+(defn ^js/Uint32Array u32-array [length value]
+  (doto (js/Uint32Array. length)
+    (.fill value)))
+
 (defn ^js/Uint32Array bit-array [size]
   (-> size (+ 31) (/ 32) js/Math.floor js/Uint32Array.))
 
-(defn bit-array-clear [bit-array n]
-  ;; TODO
-  )
+(defn bit-array-clear [bit-array idx]
+  (let [n (/ idx 32)
+        i (% idx 32)]
+    (->> (aget bit-array n)
+         (bit-xor (bit-shift-left 1 i))
+         (aset bit-array n))))
 
 
 ;;; Micro Logger

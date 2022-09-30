@@ -50,7 +50,7 @@
   (let [n (.-enabled-at h)]
     (when (nat-int? n)
       (set! (.-enabled-at h) -1)
-      (util/dec! stack-top)
+      (util/-- stack-top)
       (when (< n stack-top)
         (.splice stack n 1)))))
 

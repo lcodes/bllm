@@ -7,16 +7,27 @@
   [sym & fields]
   (let [m   (meta sym)
         ast (meta/parse-struct &env fields)]
-    `(do (def ~sym (fn ~'TODO [])) ; wrapper type (need defclass to generate getter/setter fields)
-         (bllm.ecs/component
-          ~(util/unique-hash sym fields m)
-          (bit-or ~(util/small-id sym)
-                  0)
-          ~sym
-          ~(util/js-array (:in  m))
-          ~(util/js-array (:out m))))))
+    `(def ~sym
+       (bllm.ecs/->component
+        ~(util/unique-id   sym)
+        ~(util/unique-hash sym fields m)
+        0 ; TODO meta -> options
+        ~(:size m 0)
+        nil ; TODO type
+        nil ; TODO ctor
+        nil ; TODO init
+        ~(util/u16-array (:in  m))
+        ~(util/u16-array (:out m))))))
 
 (defm defsys
-  [sym & args]
-  `(def ~sym
-     nil))
+  [sym & queries] ; TODO state ctor? or queries a series of members, with ctor in them?
+  (let [m (meta sym)]
+    `(def ~sym
+       (bllm.ecs/->system
+        ~(util/unique-id   sym)
+        ~(util/unique-hash sym queries m)
+        0 ; TODO meta -> options
+        nil ; TODO state ctor
+        nil ; TODO queries
+        nil ; TODO code
+        ))))
