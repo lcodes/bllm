@@ -28,14 +28,18 @@
     offset))
 
 (defn- emit-struct
-  [env sym fields]
+  [env sym align size vals refs]
+  (when (not-empty refs)
+    (throw (ex-info "WGSL structures may not contain references"
+                    {:sym sym :refs refs})))
   ;; TODO ctor -> ab? offset? -> dataview
-
-  (with-meta `(util/array ~@(map emit-field fields))
-    (->> (map :type fields)
+  (with-meta `(util/array ~@(map emit-field vals))
+    (->> (map :type vals)
          (filter symbol?)
          (map (comp ::uuid (partial ana/resolve-var env)))
-         (assoc (meta fields) :deps))))
+         (hash-map ::meta/align align
+                   ::meta/size  size
+                   :deps))))
 
 (defn- emit-node
   "Emits a WGSL node definition and its registration to the shader graph."
@@ -458,13 +462,13 @@
 (defnode defstruct
   "Aggregate type definition."
   [sym & fields]
-  (emit-struct &env sym (meta/parse-struct &env fields)))
+  (meta/parse-struct &env sym fields emit-struct))
 
 (defnode defbuffer
   {:keys [:type :info]}
   [sym group bind & fields]
   (let [type (binding-type sym [:uniform :storage :read-only-storage])
-        info (emit-struct &env sym (meta/parse-struct &env fields))]
+        info (meta/parse-struct &env sym fields emit-struct)]
     (with-meta {:type type :info info}
       (meta info))))
 

@@ -12,7 +12,6 @@
    ;; Editor
    [repl.cmd  :as cmd]
    [repl.dock :as dock]
-   [repl.demo :as demo]
    [repl.halt :as halt]
    [repl.game :as game]
    [repl.menu :as menu]
@@ -69,7 +68,6 @@
   (html/remove-class main "boot")
   (html/remove-class main "init")
   (core/start)
-  (demo/scene)
   (disp/frame tick))
 
 (defn- pre-init

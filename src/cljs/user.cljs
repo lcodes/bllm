@@ -5,7 +5,8 @@
             [re-frame.core :as rf]
             [bllm.util     :as util :refer [def1]]
             [repl.app      :as app]
-            [repl.halt     :as halt]))
+            [repl.halt     :as halt]
+            [game.demo     :as demo]))
 
 (defn upsert-html-node
   "Locate the matching 'tag#id' HTML element, or create it."

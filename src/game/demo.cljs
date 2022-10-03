@@ -1,5 +1,6 @@
-(ns repl.demo
-  (:require [bllm.gpu  :as gpu]
+(ns game.demo
+  (:require [bllm.ecs :as ecs]
+            [bllm.gpu  :as gpu]
             [bllm.disp :as disp]
             [bllm.meta :as meta]
             [bllm.time :as time]
@@ -922,13 +923,95 @@ fn demo_frag() -> @location(0) vec4<f32> {
 
 
 
+(ecs/defc TestScalar
+  "Single Uint8Array."
+  {:type :u8})
 
+(ecs/defc TestScalarBuffer
+  "Single Uint16Array, length = count * 16"
+  {:type :u16
+   :size 16})
 
+(ecs/defc TestVector
+  "Single Float32Array, length = count * 4"
+  {:type :vec4})
 
+(ecs/defc TestVectorBuffer
+  "Single Float32Array, length = count * 3 * 2"
+  {:type :vec3
+   :size 2})
 
+(ecs/defc TestObject
+  "Single Array"
+  {:type js/Map})
 
+(ecs/defc TestObjectBuffer
+  "Single Array, length = count * 3"
+  {:type js/Set
+   :size 3})
 
+(ecs/defc ^:shared TestShared
+  "Singleton on the block. Shares buffer with arrays. 1 byte scalar"
+  {:type :u8})
 
+(ecs/defc ^:shared TestSharedBuffer
+  "Singleton on the block. Shares buffer with arrays. 8 bytes view"
+  {:type :u8
+   :size 8})
+
+(ecs/defc TestStruct
+  "Store f1, v1 and v2 in Float32Array, u1 in Uint32Array. Wrapper view."
+  f1 :f32
+  v1 :vec3
+  u1 :u32
+  v2 :vec2)
+
+(ecs/defc TestStructBuffer
+  "Same as TestStruct, *4 count."
+  {:size 4}
+  f1 :f32
+  v1 :vec3
+  u1 :u32
+  v2 :vec2)
+
+(ecs/defc TestMixed
+  "Mixed object and prims. Array for a and Uint32Array for b."
+  a :str
+  b :u32)
+
+(ecs/defc TestMixedBuffer
+  "Same as TestMixed, *2 count."
+  {:size 2}
+  a :str
+  b :u32)
+
+(ecs/defc TestIn
+  {:in [TestScalar]
+   :type :f32})
+
+(ecs/defc TestOut1
+  {:out [TestScalar]})
+
+(ecs/defc TestOut2
+  {:out [TestScalar]})
+
+(ecs/defc TestIO
+  {:io [TestScalar]})
+
+(def test-class
+  (ecs/class TestScalar TestScalarBuffer
+             TestVector TestVectorBuffer
+             TestObject TestObjectBuffer
+             TestShared TestSharedBuffer
+             TestStruct TestStructBuffer))
+
+(comment
+  (js/console.log test-class)
+
+  (set! ecs/*world* (ecs/world))
+  (js/console.log ecs/*world*)
+
+  )
 
 (def pass-desc
   #js {:colorAttachments #js [#js {:clearValue #js [0.42 0 0.69 1]

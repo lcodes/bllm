@@ -12,8 +12,10 @@
 ;; TODO also populate cljs version of these tables.
 (def prim-table
   "Primitive alignments and sizes. Used to generate lookup tables."
-  {[:f16]                 [2 2]
-   [:bool :i32 :u32 :f32] [4 4]
+  {[:i8 :u8]              [1 1]
+   [:i16 :u16 :f16]       [2 2]
+   [:bool :i32 :u32 :f32] [4 4] ; TODO gpu bool vs cpu bool (or dont care -> use bitfields)
+   [:f64]                 [8 8]
    [:vec2 :bvec2 :uvec2 :ivec2] [  8 8]
    [:vec3 :bvec3 :uvec3 :ivec3] [16 12]
    [:vec4 :bvec4 :uvec4 :ivec4] [16 16]
@@ -31,11 +33,12 @@
   "One-time macro, used below."
   [align-table size-table]
   (letfn [(table [sym selector]
-            `(defn- ~sym [~'x]
+            `(defn ~sym [~'x]
                (case ~'x
                  ~@(util/flatten1
                     (for [[ks v] prim-table]
-                      [(seq ks) (selector v)])))))]
+                      [(seq ks) (selector v)]))
+                 nil)))]
     `(do ~(table align-table first)
          ~(table size-table second))))
 
@@ -44,38 +47,43 @@
 (comment (prim-align :mat3)
          (prim-size  :mat3))
 
+(defn resolve-type [env tag]
+  (when (and (symbol? tag) (not= "js" (namespace tag)))
+    (:meta (ana/resolve-existing-var env tag))))
+
 (defn parse-struct
   "Analyzes a data structure definition. Returns a seq of field descriptors."
-  [env fields]
+  [env sym fields cont]
   (loop [fields (partition 2 fields)
          align  0
          offset 0
+         object ()
          output ()]
     (if (empty? fields)
-      (with-meta (reverse output) {::align align ::size offset})
-      (let [field   (first   fields)
-            sym     (first   field)
-            tag     (second  field)
-            doc     (last    field)
-            doc?    (string? doc)
-            sym     (if-not doc? sym (vary-meta sym assoc :doc doc))
-            ;;m       (cond-> (drop 2 field)
-            ;;          doc? (butlast))
-            prim?   (keyword? tag)
-            info    (when (symbol? tag) ; User-defined types
-                      (:meta (ana/resolve-existing-var env tag)))
-            f-align (if prim? (prim-align tag) (::align info))
-            f-size  (if prim? (prim-size  tag) (::size  info))
-            offset  (util/align f-align offset)]
-        (recur (next fields)
-               (long (max align f-align))
-               (long (+  offset f-size))
-               (conj output {:name   sym
-                             :meta   info
-                             :type   tag
-                             :size   f-size
-                             :align  f-align
-                             :offset offset}))))))
+      (cont env sym align offset (reverse output) (reverse object))
+      (let [field (first   fields)
+            sym   (first   field)
+            tag   (second  field)
+            doc   (last    field) ; TODO this broke when adding partition
+            doc?  (string? doc)
+            sym   (if-not doc? sym (vary-meta sym assoc :doc doc))
+            prim? (prim-size tag)
+            info  (resolve-type env tag)]
+        (if (and (not prim?) (not info))
+          (recur (next fields) align offset (conj object [sym tag]) output)
+          (let [f-align (if prim? (prim-align tag) (::align info))
+                f-size  (or prim?                  (::size  info))
+                offset  (util/align f-align offset)]
+            (recur (next fields)
+                   (long (max align f-align))
+                   (long (+  offset f-size))
+                   object
+                   (conj output {:name   sym
+                                 :meta   info
+                                 :type   tag
+                                 :size   f-size
+                                 :align  f-align
+                                 :offset offset}))))))))
 
 
 ;;; Type Constructors
@@ -204,8 +212,7 @@
 
 (defm defstruct
   [sym & fields]
-  ;; check for common field type (recursive across sub-structures)
-  ;; - ie if all fields are `:u32` -> accept a `Uint32Array` as view, otherwise wrap `DataView`
+  #_
   (let [ast (parse-struct &env fields)]
     `(def ~(vary-meta sym merge (meta ast))
        "TODO")))

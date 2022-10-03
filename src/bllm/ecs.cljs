@@ -31,21 +31,20 @@
 
 (meta/defbits entity-key
   "Logical handle to a specific entity. Remains valid after structural changes."
-  entity-id 24  ; 16m entities, reused before pushing the highest ID
-  entity-ver 8) ; 256 versions, odds of collisions across cycles should be low
+  entity-index 24 ; 16m entities, reused before pushing the highest ID
+  entity-ver   8) ; 256 versions, odds of collisions across cycles should be low
 
 (meta/defbits place-key
   "Physical handle to a specific entity. Invalidated following a layout change."
-  block-id 14  ; 16k blocks
-  place-id 18) ; 256k entities per block
+  block-index 14  ; 16k blocks
+  place-index 18) ; 256k entities per block
 
 (deftype World [total   ; Number of allocated entities in this World.
                 version ; Used to trigger data remaps on structural changes.
                 systems ; Units of work streaming. Batch processors of queries.
-                queries ; Entity layout filtering, direct access to data blocks.
-                layouts ; Dynamic entity types. Block owners. Indexes queries.
-                schemas ; An array indexing the layout for every single block.
-                lookup  ; Maps component types to sets of layouts using them.
+                queries ; Entity class filtering, direct access to data blocks.
+                groups  ; Dynamic entity types. Block owners. Indexes queries.
+                lookup  ; An array indexing the group for every single block.
                 blocks  ; Typed storage of data components. Queries index here.
                 usage   ; A bit-array of the entity IDs currently in use.
                 place   ; Lookup of `entity` IDs to block and place indices.
@@ -59,9 +58,8 @@
    (->World 0 0
             #js []    ; World specific state for all entity component `systems`.
             (js/Map.) ; Component `queries` keep references inside block arrays.
-            (js/Map.) ; Entity `layouts` maintain their blocks, resolve queries.
-            #js []    ; Block `schemas` to access the layout of any given block.
-            (js/Map.) ; Type `lookup` to find layouts for a single component.
+            (js/Map.) ; Entity `groups` maintain their blocks, resolve queries.
+            #js []    ; Block `lookup` to access the layout of any given block.
             #js []    ; `blocks` are indexed by position. Random access only.
             (util/bit-array initial-entity-count)    ; usage
             (util/u32-array initial-entity-count -1) ; place
@@ -121,12 +119,14 @@
 ;;; Component Types
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(comment (js/console.log (.slice components 0 num-components)))
+(comment (js/console.log (.slice components 0 components-num)))
 
-(def1 ^:private num-components 0)
+(def1 ^:private components-num 0)
 (def1 ^:private components (js/Array. 200))
 
-(defn ^Component component [idx]
+(defn- ^Component component-get
+  "Returns an existing `Component` given its `component-index`."
+  [idx]
   (aget components idx))
 
 (meta/defbits component-key
@@ -139,48 +139,49 @@
 (meta/defflag component-opts
   "Flags complementing the `component-key` constituents."
   {:from 20} ; TODO from constant expr (component-key-bits ?)
-  component-standalone ; Component doesn't affect entity layout,
-  component-shared     ; Component belongs to entity layout, not component block.
-  component-buffer     ; Component is stored in an `ArrayBuffer`, shared or not.
-  component-wrapper    ; Access the component through the block's `DataView`.
-  component-typed      ; Access the component through a block's `TypedArray`.
-  component-empty)     ; Component has no data, acting as an entity marker only.
+  component-static  ; Component doesn't affect entity layout, separate store.
+  component-shared  ; Component belongs to a components block, not an entity.
+  component-buffer  ; Component stored in `ArrayBuffer`, `SharedArrayBuffer`.
+  component-wrapper ; Access the component through the block's `DataView`.
+  component-typed   ; Access the component through a block's `TypedArray`.
+  component-empty)  ; Component has no data, acting as an entity tag only.
 
 ;; Component types specify how to instantiate data arrays inside entity blocks.
 ;; They are referenced by queries to match layouts and perform I/O over arrays.
-(deftype Component [key  ; Index, array size & option flags.
-                    type ; Unique type. Implements component data access.
-                    ctor ; Block constructor.
-                    init ; Value initializer.
-                    ^js/Array ins    ; Input components. (From `:require`)
-                    ^js/Array outs]) ; Output components. (From `:target`)
+(deftype Component [key    ; Index, array size & option flags.
+                    type   ; Unique type. Implements component data access.
+                    ctor   ; Array constructor.
+                    init   ; Value initializer.
+                    ins    ; Input components. (From `:require`)
+                    outs]) ; Output components. (From `:target`)
 
-(defn ->component
+(defn component
   "Registers a new component structure type."
   [id hash opts size type ctor init ins outs]
-  (when (not= hash (.get id->hash id))
-    (.set id->hash id hash)
-    (let [cur (.get id->index id)
-          idx (or cur (++ num-components))]
-      (if-not cur
-        ;; Index new component. (Small indirection now, no map lookups in ticks.)
-        (.set id->index id idx)
-        ;; Dirty old component.
-        (let [existing (component idx)]
-          ;; TODO ILiveUpdate protocol
-          ;; TODO full update of existing component
-          ;; - query invalidation
-          ;; - remap existing data (reinitialize, reload, etc -> if struct layout changes, existing data is void)
-          #_(util/doarray [o (.-outs existing)]
-              (.delete (.get links o) id))))
-      ;; Insert new component.
-      (let [k (-> (component-key idx size) (bit-or opts))
-            c (->Component k type ctor init ins outs)]
-        (aset components idx c)
-        #_(util/doarray [o ins]
-            (-> (util/get-or-new links o js/Set)
-                (.add id)))
-        k))))
+  (if (= hash (.get id->hash id))
+    (.-key (component-get (.get id->index id)))
+    (do (.set id->hash id hash)
+        (let [cur (.get id->index id)
+              idx (or cur (++ components-num))]
+          (if-not cur
+            ;; Index new component. (Small indirection now, no map lookups in ticks.)
+            (.set id->index id idx)
+            ;; Dirty old component.
+            (let [existing (component-get idx)]
+              ;; TODO ILiveUpdate protocol
+              ;; TODO full update of existing component
+              ;; - query invalidation
+              ;; - remap existing data (reinitialize, reload, etc -> if struct layout changes, existing data is void)
+              #_(util/doarray [o (.-outs existing)]
+                  (.delete (.get links o) id))))
+          ;; Insert new component.
+          (let [k (-> (component-key idx size) (bit-or opts))
+                c (->Component k type ctor init ins outs)]
+            (aset components idx c)
+            #_(util/doarray [o ins]
+                (-> (util/get-or-new links o js/Set)
+                    (.add id)))
+            k)))))
 
 ;; TODO component array allocation, management & access
 
@@ -193,41 +194,51 @@
   class-num-shared 6  ; 64 shared components per class.
   class-num-empty  6) ; 64 empty components per class.
 
+(meta/defbits block-key
+  block-world-index 20  ; 1m entity blocks per world.
+  block-group-group 12) ; 4k blocks per entity class.
+
 ;; Classes are used to organize component arrays into logical entity blocks.
-(deftype Class [key components]) ; `component-id` elements. Shared first, empty last.
+(deftype Class [key          ; class index & special component counts.
+                components]) ; `component-id` elements. Shared first, empty last.
 
 ;; Groups are layout instances for a specific world, responsible of blocks.
 ;; Queries then pull data directly from arrays of the blocks they match on.
-(deftype Group [num-entities
-                ^Class          class     ; Class data shared across worlds.
-                ^js/Uint16Array blocks    ; Indices to blocks using the layout.
-                ^js/Array       queries]) ; Active block observers.
+(deftype Group [total     ; Number of entities queries match on.
+                class     ; Index to class data shared across worlds.
+                blocks    ; Indices to blocks using the layout.
+                queries]) ; Active block observers.
 
 ;; Blocks provide storage for entity batches. Data-oriented-design as JS allows.
-(deftype Block [index    ; Unique identifier of the block inside its `World`.
-                capacity ; Maximum number of entities the block can allocate.
+(deftype Block [key      ; Index of the block in world and group arrays.
+                size     ; Maximum number of entities the block can allocate.
                 length   ; Number of used entities, always packed from zero.
-                layout   ; Entity layout giving meaning to the component arrays.
+                parent   ; Entity group giving meaning to the component arrays.
+                lookup   ; Entity lookup, maps `place-index` to world `entity`.
                 arrays   ; Component data views. Uses at most one `ArrayBuffer`.
-                shared]) ; Instanced components. One per block, many per layout.
+                shared]) ; Instanced components. Each item is a block singleton.
 
-(def1 ^:private classes (js/Map.))
+(def1 ^:private class-num 0)
+(def1 ^:private classes (js/Array. 100))
 
 (def ^:private class-build-n 0)
 (def ^:private class-builder util/temp-u32)
 
-;; TODO make sure component isnt already there
+(defn ^Class class-get [idx]
+  (aget classes idx))
+
 (defn- class-build-add! [k]
   (let [x (bit-or k (cond (pos? (bit-and k component-shared)) 0
-                          (pos? (bit-and k component-empty))  0x20000000
-                          :else                               0x40000000))]
+                          (pos? (bit-and k component-empty))  0x40000000
+                          :else                               0x20000000))]
     (loop [i class-build-n]
       (if (zero? i)
         (aset class-builder i x)
         (let [j (dec i)
               y (aget class-builder j)]
           (cond (= x y) (throw (ex-info "Duplicate component in class"
-                                        {:c (component (component-index x))}))
+                                        {:c (component-get
+                                             (component-index x))}))
                 (> x y)   (aset class-builder i x)
                 :else (do (aset class-builder i y) (recur j))))))
     (++ class-build-n)))
@@ -270,24 +281,27 @@
     (util/dorange [n from len]
       (let [k (aget component-keys n)]
         (assert (number? k))
-        (when (zero? (bit-and k component-standalone))
+        (when (zero? (bit-and k component-static))
           (class-build-add! k))))
     ;; Resolve the existing class or create a new one.
-    (let [h (class-build-gen!)]
-      (or (.get classes h)
-          (let [key (class-key 0 ; TODO class index
-                               (class-sum component-keys from component-shared)
-                               (class-sum component-keys from component-empty))
-                ids (js/Uint16Array. class-build-n) ; TODO from bump alloc?
-                cls (->Class key ids)]
-            ;; Gather component indices, discard sort bits.
-            (dotimes [n class-build-n]
-              (->> (aget class-builder n)
-                   (component-index)
-                   (aset ids n)))
-            ;; TODO match against existing queries
-            (.set classes h cls)
-            cls)))))
+    (let [id (class-build-gen!)]
+      (if-let [idx (.get id->index id)]
+        (class-get idx)
+        (let [idx (++ class-num)
+              key (class-key idx
+                             (class-sum component-keys from component-shared)
+                             (class-sum component-keys from component-empty))
+              ids (js/Uint16Array. class-build-n) ; TODO from bump alloc?
+              cls (->Class key ids)]
+          ;; Gather component indices, discard sort bits.
+          (dotimes [n class-build-n]
+            (->> (aget class-builder n)
+                 (component-index)
+                 (aset ids n)))
+          ;; TODO match against existing queries
+          (.set id->index id idx)
+          (aset classes idx cls)
+          cls)))))
 
 (defn* class []
   (class-for (js-arguments) 0))
@@ -295,24 +309,33 @@
 (comment (js/console.log (class Name)
                          (class Name Tags)
                          (class Tags Name))
-         (js/console.log classes))
+         (js/console.log (.slice classes 0 class-num)))
 
-(defn- block-new [layout]
+(defn- group-for
+  "Get the group corresponding to the given class key in the current world."
+  [k]
+  (let [^js/Map groups (.-groups *world*)]
+    (or (.get groups k)
+        (let [g (->Group 0 (class-index k) #js [] #js [])] ; TODO to uint16array, will need resize handling
+          (.set groups k g)
+          g))))
+
+(defn- block-add [group block]
   )
 
-(defn- block-add [layout block]
+(defn- block-del [group block]
   )
 
-(defn- block-del [layout block]
+(defn- block-new [components group]
   )
 
-(defn- ^Block block-for [layout]
+(defn- ^Block block-for [components group]
   ;; TODO reuse free blocks
-  (block-new layout))
+  (block-new components group))
 
 (defn- block-update [^Block block count]
-  (let [cap (.-capacity block)
-        len (.-length   block)]
+  (let [cap (.-size   block)
+        len (.-length block)]
     (assert (not= count len))
     (assert (<=   count cap))
     (if (zero? count)
@@ -322,13 +345,24 @@
           (set! (.-length block) count)))))
 
 (defn- block-alloc [^Block block count]
-  (let [cap (.-capacity block)
-        len (.-length   block)]
+  (let [cap (.-size   block)
+        len (.-length block)]
     (assert (not= cap len))
     (let [num (js/Math.min count (- cap len))]
       (block-update block (+ len num))
       ;; (+= ) TODO increment entity count in block layout ?
       num)))
+
+(defn- entity-alloc [^Block block index count ids offset]
+  (let [b (block-world-index (.-key block))
+        l (.-lookup block)
+        i (.-index *world*)]
+    (dotimes [n count]
+      (let [id (aget ids (+ offset n))
+            e  (+ index n)
+            k  (place-key b e)]
+        (aset l e id)
+        (aset i id k)))))
 
 
 ;;; Query Views
@@ -373,7 +407,7 @@
 ;; global frame execution is a materialized view of [state-delta query-function query-params ...]
 ;; frame execution just streams through that like microcode; reverse polish notation? Forth interesting model here
 
-(defn ->system
+(defn system
   "Register a system definition. Each system is a composable batch of work in a
   larger frame tick, with feedback possible across frames.
 
@@ -409,21 +443,17 @@
 ;;; High-Level Interface
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn- entity-alloc [^Block block index count ids offset]
-  (dotimes [n count]
-    (let [id (aget ids (+ offset n))
-          e  (+ index n)]
-      (aset (.-entities block) e id)
-      (aset (.-index *world*) id (place-key (.-index block) e)))))
-
 (defn entities-into
   "Allocates entity IDs and constructs block storage for their data components."
-  [layout ids]
-  (let [o 0 ; both mutable
+  [^Class class ids]
+  (let [c (.-components class)
+        g (group-for (.-key class))
+        o 0 ; both mutable
         n (world-alloc ids)]
     (+= (.-total *world*) n)
+    (+= (.-total g) n)
     (while (pos? n)
-      (let [block (block-for layout)
+      (let [block (block-for c g)
             index (.-length block)
             count (block-alloc block n)]
         (entity-alloc block index count ids o)
@@ -431,11 +461,11 @@
         (-= n count)))
     ids))
 
-(defn entities-from [layout count]
-  (entities-into layout (js/Uint32Array. count)))
+(defn entities-from [class count]
+  (entities-into class (js/Uint32Array. count)))
 
-(defn entity-from [layout]
-  (aget (entities-into layout util/unit-u32) 0))
+(defn entity-from [class]
+  (aget (entities-into class util/unit-u32) 0))
 
 (defn entity-remove [ids]
   )
@@ -462,12 +492,27 @@
 ;;; Builtin Components
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn- name-get [e]
+  ;; TODO find `NameIndex` in world (def as direct index? need sparse lookup)
+  ;; - return name from system
+  )
+
+(defn- name-set [e name]
+  ;; - update name in system
+  )
+
+;; TODO having get/set make it an empty component
 (bllm.ecs/defc Name
-  "Display name of the entity. Optional."
-  {:type :str})
+  "Unique display name of the entity. Optional, unnamed entity if missing."
+  {:type :str
+   :get  name-get
+   :set  name-set})
+
+(bllm.ecs/defsys NameIndex
+  {:state #js []})
 
 (bllm.ecs/defc Tags
-  "Semantic tags of the entity."
+  "Semantic tags of the entity. Optional, assume 0 if missing."
   {:type :u32})
 
 ;; TODO as a fundamental system
