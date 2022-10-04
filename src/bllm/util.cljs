@@ -113,9 +113,16 @@
 ;;; Statically Typed Dynamic Memory
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(defn align [alignment-1 size]
+  (bit-and (+ alignment-1 size) (bit-not alignment-1)))
+
 (defn array-copy [dst src]
   (util/doarray [x i src]
     (aset dst i x)))
+
+(defn ^js/Uint16Array u16-array [length value]
+  (doto (js/Uint16Array. length)
+    (.fill value)))
 
 (defn ^js/Uint32Array u32-array [length value]
   (doto (js/Uint32Array. length)

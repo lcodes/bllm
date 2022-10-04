@@ -181,34 +181,36 @@
                         (long (bit-shift-left bit 1))
                         (conj xs (emit-const x bit)))))))))
 
+(defn- emit-bits [sym bits sz]
+  `(do ~(when-not (:transient (meta sym))
+          `(defn ~(vary-meta sym assoc ::align sz ::size sz)
+             ~(mapv first bits)
+             ~@(for [[elem mask] bits]
+                 `(assert (>= ~mask ~elem)))
+             (bit-or ~@(for [[elem mask shift] bits]
+                         `(bit-shift-left ~elem ~shift)))))
+       ~@(for [[elem mask shift] bits]
+           (when-not (:transient (meta elem))
+             `(defn ~elem [~sym]
+                (bit-and ~mask (unsigned-bit-shift-right ~sym ~shift)))))))
+
 (defm defbits
   "Packs one or more integer attributes into a unsigned int."
   [sym & elems]
   (when (or (> 2  (count elems))
             (odd? (count elems)))
     (throw (Exception. "Invalid number of elements")))
-  (let [bits (loop [xs elems
-                    n  0
-                    o  ()]
-               (if-not xs
-                 (if (> n 32)
-                   (throw (ex-info "Too many bits" {:bits n}))
-                   (reverse o))
-                 (let [bits (second xs)]
-                   (recur (nnext xs)
-                          (long (+ n bits))
-                          (conj o [(first xs) (dec (bit-shift-left 1 bits)) n])))))]
-    ;; TODO meta for packed type? ie could fit in u8, u16 or u32 - no u64 in JS
-    `(do ~(when-not (:transient (meta sym))
-            `(defn ~sym ~(mapv first bits)
-               ~@(for [[elem mask] bits]
-                   `(assert (>= ~mask ~elem)))
-               (bit-or ~@(for [[elem mask shift] bits]
-                           `(bit-shift-left ~elem ~shift)))))
-         ~@(for [[elem mask shift] bits]
-             (when-not (:transient (meta elem))
-               `(defn ~elem [~sym]
-                  (bit-and ~mask (unsigned-bit-shift-right ~sym ~shift))))))))
+  (loop [xs elems
+         n  0
+         o  ()]
+    (if-not xs
+      (if (> n 32)
+        (throw (ex-info "Too many bits" {:bits n}))
+        (emit-bits sym (reverse o) (condp >= n 8 1   16 2   4)))
+      (let [bits (second xs)]
+        (recur (nnext xs)
+               (long (+ n bits))
+               (conj o [(first xs) (dec (bit-shift-left 1 bits)) n]))))))
 
 (defm defstruct
   [sym & fields]

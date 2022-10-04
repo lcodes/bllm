@@ -25,9 +25,15 @@
 ;;; Entity Worlds
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(cli/defvar default-entity-count
+(cli/defvar default-world-entities
   "How many entities to reserve storage for when creating a new generic world."
   1000)
+
+(cli/defvar default-world-blocks
+  100)
+
+(cli/defvar default-group-blocks
+  10)
 
 (meta/defbits entity-key
   "Logical handle to a specific entity. Remains valid after structural changes."
@@ -36,16 +42,17 @@
 
 (meta/defbits place-key
   "Physical handle to a specific entity. Invalidated following a layout change."
-  block-index 14  ; 16k blocks
-  place-index 18) ; 256k entities per block
+  block-index 20  ; 1m blocks per world
+  place-index 12) ; 4k entities per block
 
 (deftype World [total   ; Number of allocated entities in this World.
                 version ; Used to trigger data remaps on structural changes.
                 systems ; Units of work streaming. Batch processors of queries.
                 queries ; Entity class filtering, direct access to data blocks.
                 groups  ; Dynamic entity types. Block owners. Indexes queries.
-                lookup  ; An array indexing the group for every single block.
                 blocks  ; Typed storage of data components. Queries index here.
+                lookup  ; An array indexing the group for every single block.
+                index   ; A bit-array of the block IDs currently in use.
                 usage   ; A bit-array of the entity IDs currently in use.
                 place   ; Lookup of `entity` IDs to block and place indices.
                 check]) ; Current version numbers of allocated entities.
@@ -53,14 +60,15 @@
 (defn world
   "Creates an empty ECS `World`."
   ([]
-   (world default-entity-count))
-  ([initial-entity-count]
+   (world default-world-entities default-world-blocks))
+  ([initial-entity-count initial-block-count]
    (->World 0 0
             #js []    ; World specific state for all entity component `systems`.
             (js/Map.) ; Component `queries` keep references inside block arrays.
-            (js/Map.) ; Entity `groups` maintain their blocks, resolve queries.
-            #js []    ; Block `lookup` to access the layout of any given block.
-            #js []    ; `blocks` are indexed by position. Random access only.
+            (js/Map.) ; Class `groups` maintain their blocks, resolve queries.
+            (js/Array. initial-block-count) ; Entity `blocks` store components.
+            (js/Array. initial-block-count) ; Group `lookup` for every block.
+            (util/bit-array initial-block-count)     ; index
             (util/bit-array initial-entity-count)    ; usage
             (util/u32-array initial-entity-count -1) ; place
             (js/Uint8Array. initial-entity-count)))) ; check
@@ -71,6 +79,22 @@
 ;; Time travel/debugging binds a previous version of the world.
 ;; Speculative evaluation binds a copy-on-write clone of the current world.
 (def ^:dynamic ^World *world* nil)
+
+(defn- world-block
+  []
+  (let [mem (.-index *world*)]
+    (util/doarray [bits n mem]
+      (when (not= 0xffffffff bits)
+        (dotimes [shift 32]
+          (let [bit (bit-shift-left 1 shift)]
+            (when (zero? (bit-and bits bit))
+              (aset mem n (bit-or bits bit))
+              (util/return (+ (* n 32) shift)))))))
+    (assert false "TODO block index full")))
+
+(defn- world-block-free
+  [idx]
+  (util/bit-array-clear (.-index *world*) idx))
 
 (defn- world-alloc
   "Reserves as many entities in the active world as needed to fill `out`."
@@ -124,11 +148,6 @@
 (def1 ^:private components-num 0)
 (def1 ^:private components (js/Array. 200))
 
-(defn- ^Component component-get
-  "Returns an existing `Component` given its `component-index`."
-  [idx]
-  (aget components idx))
-
 (meta/defbits component-key
   "A component's key acts as it's definition index, its element count and flags.
 
@@ -146,18 +165,28 @@
   component-typed   ; Access the component through a block's `TypedArray`.
   component-empty)  ; Component has no data, acting as an entity tag only.
 
+(meta/defbits component-mem
+  component-align 4
+  component-size 12)
+
 ;; Component types specify how to instantiate data arrays inside entity blocks.
 ;; They are referenced by queries to match layouts and perform I/O over arrays.
 (deftype Component [key    ; Index, array size & option flags.
+                    mem    ; Memory sizes, per entity and per block.
                     type   ; Unique type. Implements component data access.
                     ctor   ; Array constructor.
                     init   ; Value initializer.
                     ins    ; Input components. (From `:require`)
                     outs]) ; Output components. (From `:target`)
 
+(defn- ^Component component-get
+  "Returns an existing `Component` given its `component-index`."
+  [idx]
+  (aget components idx))
+
 (defn component
   "Registers a new component structure type."
-  [id hash opts size type ctor init ins outs]
+  [id hash opts align size array-size type ctor init ins outs]
   (if (= hash (.get id->hash id))
     (.-key (component-get (.get id->index id)))
     (do (.set id->hash id hash)
@@ -175,8 +204,9 @@
               #_(util/doarray [o (.-outs existing)]
                   (.delete (.get links o) id))))
           ;; Insert new component.
-          (let [k (-> (component-key idx size) (bit-or opts))
-                c (->Component k type ctor init ins outs)]
+          (let [m (component-mem align size)
+                k (-> (component-key idx array-size) (bit-or opts))
+                c (->Component k m type ctor init ins outs)]
             (aset components idx c)
             #_(util/doarray [o ins]
                 (-> (util/get-or-new links o js/Set)
@@ -194,9 +224,23 @@
   class-num-shared 6  ; 64 shared components per class.
   class-num-empty  6) ; 64 empty components per class.
 
+(meta/defbits group-totals
+  group-blocks 12  ; Allocated. May not all be full, or empty.
+  group-allocs 20) ; 16m entities across all blocks. Matches world limit.
+
+(meta/defbits group-counts
+  group-full-blocks 12  ; Index of the first free block. Matches class limits.
+  group-class-index 20) ; 1m possible classes. Matches class key.
+
 (meta/defbits block-key
-  block-world-index 20  ; 1m entity blocks per world.
-  block-group-group 12) ; 4k blocks per entity class.
+  block-world-index 20  ; 1m entity blocks per world. Matches world limit.
+  block-group-index 12) ; 4k blocks per entity class.
+
+(meta/defbits block-cap
+  block-allocs 12
+  block-length 12)
+
+(util/defconst max-block-size 4096)
 
 ;; Classes are used to organize component arrays into logical entity blocks.
 (deftype Class [key          ; class index & special component counts.
@@ -204,16 +248,14 @@
 
 ;; Groups are layout instances for a specific world, responsible of blocks.
 ;; Queries then pull data directly from arrays of the blocks they match on.
-(deftype Group [total     ; Number of entities queries match on.
-                class     ; Index to class data shared across worlds.
-                blocks    ; Indices to blocks using the layout.
+(deftype Group [totals    ; Total number of entities and blocks for this group.
+                counts    ; Index to class data and to the first free block.
+                blocks    ; Indices to all blocks made from this group's class.
                 queries]) ; Active block observers.
 
 ;; Blocks provide storage for entity batches. Data-oriented-design as JS allows.
 (deftype Block [key      ; Index of the block in world and group arrays.
-                size     ; Maximum number of entities the block can allocate.
-                length   ; Number of used entities, always packed from zero.
-                parent   ; Entity group giving meaning to the component arrays.
+                cap      ; Packed count and capacity of allocated entities.
                 lookup   ; Entity lookup, maps `place-index` to world `entity`.
                 arrays   ; Component data views. Uses at most one `ArrayBuffer`.
                 shared]) ; Instanced components. Each item is a block singleton.
@@ -227,7 +269,10 @@
 (defn ^Class class-get [idx]
   (aget classes idx))
 
-(defn- class-build-add! [k]
+(defn ^Block block-get [idx]
+  (aget (.-blocks *world*) idx))
+
+(defn- class-build-add [k]
   (let [x (bit-or k (cond (pos? (bit-and k component-shared)) 0
                           (pos? (bit-and k component-empty))  0x40000000
                           :else                               0x20000000))]
@@ -244,14 +289,13 @@
     (++ class-build-n)))
 
 (comment (set! class-build-n 0) class-builder
-         (class-build-add! bllm.scene/World)
-         (class-build-add! Tags)
-         (class-build-gen!))
+         (class-build-add bllm.scene/World)
+         (class-build-add Tags)
+         (class-build-gen))
 
-(defn- class-build-gen! []
-  (loop [n 0
-         h 0]
-    (if (>= n class-build-n)
+(defn- class-build-gen []
+  (loop [n 0 h 0]
+    (if (= n class-build-n)
       h
       (let [id (component-index (aget class-builder n))]
         (->> (bit-and id 0xf)
@@ -260,8 +304,7 @@
              (recur (inc n)))))))
 
 (defn- class-sum [keys from flag]
-  (loop [n from
-         c 0]
+  (loop [n from c 0]
     (if (= n (alength keys))
       c
       (let [k (aget keys n)]
@@ -282,9 +325,9 @@
       (let [k (aget component-keys n)]
         (assert (number? k))
         (when (zero? (bit-and k component-static))
-          (class-build-add! k))))
+          (class-build-add k))))
     ;; Resolve the existing class or create a new one.
-    (let [id (class-build-gen!)]
+    (let [id (class-build-gen)]
       (if-let [idx (.get id->index id)]
         (class-get idx)
         (let [idx (++ class-num)
@@ -316,9 +359,21 @@
   [k]
   (let [^js/Map groups (.-groups *world*)]
     (or (.get groups k)
-        (let [g (->Group 0 (class-index k) #js [] #js [])] ; TODO to uint16array, will need resize handling
+        (let [g (->Group 0
+                         (group-counts 0 (class-index k))
+                         (util/u16-array default-group-blocks -1)
+                         #js [])]
           (.set groups k g)
           g))))
+
+(defn- group-block
+  [^Group group world-index]
+  (let [index (.-blocks group)]
+    (util/doarray [x i index]
+      (when (= 0xffff x)
+        (aset index i world-index)
+        (util/return i)))
+    (assert false "TODO group blocks full")))
 
 (defn- block-add [group block]
   )
@@ -326,12 +381,58 @@
 (defn- block-del [group block]
   )
 
-(defn- block-new [components group]
-  )
+(defn- block-shared-size [init-sz ids end]
+  (loop [n 0 sz init-sz]
+    (if (= n end)
+      sz
+      (let [mem (.-mem (component-get (aget ids n)))]
+        (recur (inc n)
+               (-> (component-align mem)
+                   (util/align sz)
+                   (+ (component-size mem))))))))
 
-(defn- ^Block block-for [components group]
-  ;; TODO reuse free blocks
-  (block-new components group))
+(defn- block-entity-size [shared-sz ids begin end capacity]
+  (loop [n begin sz shared-sz]
+    (if (= n end)
+      sz
+      (let [mem (.-mem (component-get (aget ids n)))]
+        (recur (inc n)
+               (-> (component-align mem)
+                   (util/align sz)
+                   (+ (* (component-size mem) capacity))))))))
+
+(defn- block-new [^Class class ^Group group size-hint]
+  (let [capacity (min size-hint max-block-size)
+        comps    (.-components class)
+        class-k  (.-key class)
+        n-shared (class-num-shared class-k)
+        n-empty  (class-num-empty  class-k)
+        n-end    (+ n-shared n-empty)
+        o-shared (* 4 capacity) ; lookup size, shared offset
+        buf-sz   (-> o-shared
+                     (block-shared-size comps n-shared)
+                     (block-entity-size comps n-shared n-end capacity))
+        buffer   (js/ArrayBuffer. buf-sz)
+        lookup   (js/Uint32Array. buffer o-shared capacity)
+        arrays   (js/Array. (- n-end n-shared))
+        shared   (js/Array. n-shared)
+        n-world  (world-block)
+        n-group  (group-block group n-world)
+        block    (->Block (block-key n-world n-group)
+                          (block-cap 0 capacity)
+                          lookup arrays shared)]
+    (aset (.-blocks *world*) n-world block)
+    (aset (.-lookup *world*) n-world group)
+    ;; TODO create typed arrays & shared from buffer
+    ;; - create object arrays
+    block))
+
+(defn- ^Block block-for [class ^Group group size-hint]
+  (let [total (group-blocks      (.-totals group))
+        index (group-full-blocks (.-counts group))]
+    (if (not= first total)
+      (block-get (aget (.-blocks group) index))
+      (block-new class group size-hint))))
 
 (defn- block-update [^Block block count]
   (let [cap (.-size   block)
@@ -446,14 +547,13 @@
 (defn entities-into
   "Allocates entity IDs and constructs block storage for their data components."
   [^Class class ids]
-  (let [c (.-components class)
-        g (group-for (.-key class))
+  (let [g (group-for (.-key class))
         o 0 ; both mutable
         n (world-alloc ids)]
     (+= (.-total *world*) n)
     (+= (.-total g) n)
     (while (pos? n)
-      (let [block (block-for c g)
+      (let [block (block-for class g n)
             index (.-length block)
             count (block-alloc block n)]
         (entity-alloc block index count ids o)

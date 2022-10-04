@@ -7,7 +7,7 @@
         (not next)  flag
         :else (list 'bit-or flag next)))
 
-(defn- emit-component [sym opts type ctor init]
+(defn- emit-component [sym opts align size type ctor init]
   (let [m (meta sym)]
     `(def ~sym
        (bllm.ecs/component
@@ -17,7 +17,7 @@
              (component-option m :static 'bllm.ecs/component-static)
              (component-option m :shared 'bllm.ecs/component-shared)
              (or 0))
-        ~(dec (:size m 1))
+        ~(dec (or align 1)) ~(or size 0) ~(dec (:size m 1))
         nil ; TODO type
         nil ; TODO ctor
         nil ; TODO init
@@ -29,6 +29,8 @@
         info  (meta/resolve-type env ty)]
     (emit-component sym
                     (when prim? 'bllm.ecs/component-buffer) ; TODO from info too
+                    (if prim? (meta/prim-align ty) (::meta/align info))
+                    (or prim?                      (::meta/size  info))
                     nil    ; type -> data access
                     nil    ; info to construct array (component size, alignment; view type)
                     nil))) ; initial value of entity elements
@@ -41,6 +43,7 @@
                     (if (not vals)
                       'bllm.ecs/component-empty
                       'bllm.ecs/component-buffer))
+                  align size
                   nil
                   nil
                   nil))
