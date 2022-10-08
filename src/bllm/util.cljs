@@ -99,10 +99,15 @@
 (def temp-map (js/Map.))
 (def temp-set (js/Set.))
 
+(defn new-array [n]
+  (if (zero? n)
+    empty-array
+    (js/Array. n)))
+
 (defn clear-array [^js/Array a]
   (.splice a 0 (.-length a)))
 
-(defn color [r g b a]
+(defn temp-color [r g b a]
   (aset bytes 0 r)
   (aset bytes 1 g)
   (aset bytes 2 b)

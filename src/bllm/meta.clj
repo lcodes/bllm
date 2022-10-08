@@ -192,7 +192,12 @@
        ~@(for [[elem mask shift] bits]
            (when-not (:transient (meta elem))
              `(defn ~elem [~sym]
-                (bit-and ~mask (unsigned-bit-shift-right ~sym ~shift)))))))
+                ~(if (= 1 mask)
+                   `(pos? (bit-and ~sym ~(bit-shift-left 1 shift)))
+                   `(bit-and ~mask
+                             ~(if (zero? shift)
+                                sym
+                                `(unsigned-bit-shift-right ~sym ~shift)))))))))
 
 (defm defbits
   "Packs one or more integer attributes into a unsigned int."

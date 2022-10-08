@@ -27,7 +27,7 @@
 
 ;; Launch the application right away. TODO setup dev plugins
 (def1 app-ctx
-  (do (devtools/install! [:formatters :hints]) ; TODO chrome devtools only
+  (do #_(devtools/install! [:formatters :hints]) ; TODO chrome devtools only
       (app/init fix-scripts)
       :ok))
 

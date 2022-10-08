@@ -1,29 +1,13 @@
 (ns bllm.ecs
-  (:require-macros [bllm.ecs])
+  (:require-macros [bllm.ecs :as ecs])
   (:require [bllm.cli  :as cli]
             [bllm.data :as data]
             [bllm.meta :as meta]
-            [bllm.util :as util :refer [def1 defn* ++ += -= |=]]))
+            [bllm.util :as util :refer [def1 defn* === !== ++ += -= |=]]))
 
 (set! *warn-on-infer* true)
 
 (cli/defgroup config)
-
-(def1 ^:private version
-  "Incremented on structural changes to mark existing worlds dirty."
-  0)
-
-(def1 ^:private id->index (js/Map.)) ; id -> index
-(def1 ^:private id->links (js/Map.)) ; id -> (Set id)
-(def1 ^:private id->hash  (js/Map.)) ; id -> generated content hash
-
-(comment (js/console.log id->index)
-         (js/console.log id->links)
-         (js/console.log id->hash))
-
-
-;;; Entity Worlds
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (cli/defvar default-world-entities
   "How many entities to reserve storage for when creating a new generic world."
@@ -35,6 +19,48 @@
 (cli/defvar default-group-blocks
   10)
 
+(cli/defvar block-min-cap 32)
+(cli/defvar block-max-cap 1024)
+
+(def1 ^:private version
+  "Incremented on structural changes to mark existing worlds dirty."
+  0)
+
+(def1 ^:private id->index (js/Map.))
+(def1 ^:private id->links (js/Map.))
+(def1 ^:private id->hash  (js/Map.))
+
+(def1 ^:private systems-num 0)
+(def1 ^:private systems (js/Array. 100))
+
+(def1 ^:private components-num 0)
+(def1 ^:private components (js/Array. 200))
+
+(def1 ^:private classes-num 0)
+(def1 ^:private classes (js/Array. 400))
+
+(def1 ^:private queries-num 0)
+(def1 ^:private queries (js/Array. 300))
+
+(comment (js/console.log id->index)
+         (js/console.log id->links)
+         (js/console.log id->hash)
+
+         (js/console.log (.slice systems    0 systems-num   ))
+         (js/console.log (.slice components 0 components-num))
+         (js/console.log (.slice classes    0 classes-num   )))
+
+;; TODO "placed" blocks: guaranteed not to move, always changes layout in batch
+;; - any uses? entities inside can still move, unless that can be enforced too?
+;; - ie static scene content; already chunked by region and matches load units.
+;; - adding/removing tags to perform system updates -> no existing blocks / too small.
+;;
+;; not for all content, but good to have when needed
+
+
+;;; Entity Worlds
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 (meta/defbits entity-key
   "Logical handle to a specific entity. Remains valid after structural changes."
   entity-index 24 ; 16m entities, reused before pushing the highest ID
@@ -45,13 +71,15 @@
   block-index 20  ; 1m blocks per world
   place-index 12) ; 4k entities per block
 
+;; TODO need a system lookup (system-index -> system state for this world)
 (deftype World [total   ; Number of allocated entities in this World.
                 version ; Used to trigger data remaps on structural changes.
                 systems ; Units of work streaming. Batch processors of queries.
                 queries ; Entity class filtering, direct access to data blocks.
                 groups  ; Dynamic entity types. Block owners. Indexes queries.
-                blocks  ; Typed storage of data components. Queries index here.
+                states  ; An array indexing the state for every single system.
                 lookup  ; An array indexing the group for every single block.
+                blocks  ; Typed storage of data components. Queries index here.
                 index   ; A bit-array of the block IDs currently in use.
                 usage   ; A bit-array of the entity IDs currently in use.
                 place   ; Lookup of `entity` IDs to block and place indices.
@@ -66,8 +94,9 @@
             #js []    ; World specific state for all entity component `systems`.
             (js/Map.) ; Component `queries` keep references inside block arrays.
             (js/Map.) ; Class `groups` maintain their blocks, resolve queries.
-            (js/Array. initial-block-count) ; Entity `blocks` store components.
+            (js/Array. systems-num) ; System `states` resolved by system index.
             (js/Array. initial-block-count) ; Group `lookup` for every block.
+            (js/Array. initial-block-count) ; Entity `blocks` store components.
             (util/bit-array initial-block-count)     ; index
             (util/bit-array initial-entity-count)    ; usage
             (util/u32-array initial-entity-count -1) ; place
@@ -78,7 +107,7 @@
 ;; Commands (editor, load/save, etc) bind their own world.
 ;; Time travel/debugging binds a previous version of the world.
 ;; Speculative evaluation binds a copy-on-write clone of the current world.
-(def ^:dynamic ^World *world* nil)
+(def1 ^:dynamic ^World *world* nil)
 
 (defn- world-block
   []
@@ -94,6 +123,7 @@
 
 (defn- world-block-free
   [idx]
+  (aset (.-blocks *world*) idx nil)
   (util/bit-array-clear (.-index *world*) idx))
 
 (defn- world-alloc
@@ -143,11 +173,6 @@
 ;;; Component Types
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(comment (js/console.log (.slice components 0 components-num)))
-
-(def1 ^:private components-num 0)
-(def1 ^:private components (js/Array. 200))
-
 (meta/defbits component-key
   "A component's key acts as it's definition index, its element count and flags.
 
@@ -158,14 +183,17 @@
 (meta/defflag component-opts
   "Flags complementing the `component-key` constituents."
   {:from 20} ; TODO from constant expr (component-key-bits ?)
-  component-static  ; Component doesn't affect entity layout, separate store.
+  component-static  ; Component doesn't affect entity layout, separate store. TODO rethink this
+  component-system  ; Component belongs to a system, not deleted with entity.
   component-shared  ; Component belongs to a components block, not an entity.
   component-buffer  ; Component stored in `ArrayBuffer`, `SharedArrayBuffer`.
-  component-wrapper ; Access the component through the block's `DataView`.
-  component-typed   ; Access the component through a block's `TypedArray`.
-  component-empty)  ; Component has no data, acting as an entity tag only.
+  component-wrapper ; Access the component through the block's `DataView`. TODO
+  component-typed   ; Access the component through a block's `TypedArray`. TODO
+  component-empty   ; Component has no data, acting as an entity tag only.
+  component-linked) ; Component is a direct place link between two entities.
 
 (meta/defbits component-mem
+  "Memory requirements for components with values stored in an `ArrayBuffer`."
   component-align 4
   component-size 12)
 
@@ -220,35 +248,34 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (meta/defbits class-key
-  class-index     20  ; 1m possible entity classes.
-  class-num-shared 6  ; 64 shared components per class.
-  class-num-empty  6) ; 64 empty components per class.
+  class-index     19  ; 512k possible entity classes.
+  class-linked     1  ; Whether this class contains linked entities.
+  class-num-shared 6  ; Up to 64 shared components per class.
+  class-num-empty  6) ; Up to 64 empty components per class.
 
-(meta/defbits group-totals
+(meta/defbits group-limits
   group-blocks 12  ; Allocated. May not all be full, or empty.
   group-allocs 20) ; 16m entities across all blocks. Matches world limit.
 
 (meta/defbits group-counts
-  group-full-blocks 12  ; Index of the first free block. Matches class limits.
-  group-class-index 20) ; 1m possible classes. Matches class key.
+  group-full-blocks 12  ; Index of the first free block. Matches group limits.
+  group-class-index 19) ; 512k possible classes. Matches class key.
 
 (meta/defbits block-key
-  block-world-index 20  ; 1m entity blocks per world. Matches world limit.
-  block-group-index 12) ; 4k blocks per entity class.
+  block-world-index 20  ; 1m entity blocks per world. Matches place limit.
+  block-group-index 12) ; 4k possible blocks per entity class.
 
 (meta/defbits block-cap
-  block-allocs 12
-  block-length 12)
-
-(util/defconst max-block-size 4096)
+  block-length 12 ; 4k possible entities per block. Matches place limit.
+  block-allocs 12)
 
 ;; Classes are used to organize component arrays into logical entity blocks.
 (deftype Class [key          ; class index & special component counts.
                 components]) ; `component-id` elements. Shared first, empty last.
 
-;; Groups are layout instances for a specific world, responsible of blocks.
+;; Groups are class instances for a specific world, responsible for blocks.
 ;; Queries then pull data directly from arrays of the blocks they match on.
-(deftype Group [totals    ; Total number of entities and blocks for this group.
+(deftype Group [limits    ; Total number of entities and blocks for this group.
                 counts    ; Index to class data and to the first free block.
                 blocks    ; Indices to all blocks made from this group's class.
                 queries]) ; Active block observers.
@@ -260,22 +287,17 @@
                 arrays   ; Component data views. Uses at most one `ArrayBuffer`.
                 shared]) ; Instanced components. Each item is a block singleton.
 
-(def1 ^:private class-num 0)
-(def1 ^:private classes (js/Array. 100))
-
 (def ^:private class-build-n 0)
 (def ^:private class-builder util/temp-u32)
 
-(defn ^Class class-get [idx]
-  (aget classes idx))
+(defn ^Class class-get [idx] (aget classes idx))
 
-(defn ^Block block-get [idx]
-  (aget (.-blocks *world*) idx))
+(defn ^Block block-get [idx] (aget (.-blocks *world*) idx))
 
 (defn- class-build-add [k]
-  (let [x (bit-or k (cond (pos? (bit-and k component-shared)) 0
-                          (pos? (bit-and k component-empty))  0x40000000
-                          :else                               0x20000000))]
+  (let [x (bit-or k (cond (pos? (bit-and k component-shared)) 0x20000000
+                          (pos? (bit-and k component-empty))  0x40000000 ; Last
+                          :else                               0))] ; First
     (loop [i class-build-n]
       (if (zero? i)
         (aset class-builder i x)
@@ -288,11 +310,6 @@
                 :else (do (aset class-builder i y) (recur j))))))
     (++ class-build-n)))
 
-(comment (set! class-build-n 0) class-builder
-         (class-build-add bllm.scene/World)
-         (class-build-add Tags)
-         (class-build-gen))
-
 (defn- class-build-gen []
   (loop [n 0 h 0]
     (if (= n class-build-n)
@@ -303,14 +320,29 @@
              (bit-xor h)
              (recur (inc n)))))))
 
+(comment (set! class-build-n 0) class-builder
+         (class-build-add bllm.scene/World)
+         (class-build-add Tags)
+         (class-build-gen))
+
 (defn- class-sum [keys from flag]
-  (loop [n from c 0]
-    (if (= n (alength keys))
-      c
-      (let [k (aget keys n)]
-        (recur (inc n) (if (zero? (bit-and k flag))
-                         c
-                         (inc c)))))))
+  (let [end (alength keys)]
+    (loop [n from c 0]
+      (if (= n end)
+        c
+        (let [k (aget keys n)]
+          (recur (inc n) (if (zero? (bit-and k flag))
+                           c
+                           (inc c))))))))
+
+(defn- class-bit [keys from flag]
+  (let [end (alength keys)]
+    (loop [n from]
+      (if (= n end)
+        false
+        (if (pos? (bit-and (aget keys n) flag))
+          true
+          (recur (inc n)))))))
 
 (defn- class-for [component-keys from]
   (set! class-build-n 0)
@@ -320,7 +352,7 @@
     (when (< (alength class-builder) num)
       (js/console.warn "growing ecs class builder to" num)
       (set! class-builder (js/Uint16Array. num)))
-    ;; Sort the components, so A+B and B+A are the same.
+    ;; Sort the components, so A+B and B+A are the same. Shared and empty last.
     (util/dorange [n from len]
       (let [k (aget component-keys n)]
         (assert (number? k))
@@ -330,8 +362,9 @@
     (let [id (class-build-gen)]
       (if-let [idx (.get id->index id)]
         (class-get idx)
-        (let [idx (++ class-num)
+        (let [idx (++ classes-num)
               key (class-key idx
+                             (class-bit component-keys from component-linked)
                              (class-sum component-keys from component-shared)
                              (class-sum component-keys from component-empty))
               ids (js/Uint16Array. class-build-n) ; TODO from bump alloc?
@@ -349,10 +382,11 @@
 (defn* class []
   (class-for (js-arguments) 0))
 
-(comment (js/console.log (class Name)
+(comment (js/console.log (class)
+                         (class Name)
                          (class Name Tags)
-                         (class Tags Name))
-         (js/console.log (.slice classes 0 class-num)))
+                         (class Tags Name)
+                         (class Name Tags Enabled)))
 
 (defn- group-for
   "Get the group corresponding to the given class key in the current world."
@@ -375,14 +409,8 @@
         (util/return i)))
     (assert false "TODO group blocks full")))
 
-(defn- block-add [group block]
-  )
-
-(defn- block-del [group block]
-  )
-
-(defn- block-shared-size [init-sz ids end]
-  (loop [n 0 sz init-sz]
+(defn- block-shared-size [init-sz ids begin end]
+  (loop [n begin sz init-sz]
     (if (= n end)
       sz
       (let [mem (.-mem (component-get (aget ids n)))]
@@ -391,8 +419,8 @@
                    (util/align sz)
                    (+ (component-size mem))))))))
 
-(defn- block-entity-size [shared-sz ids begin end capacity]
-  (loop [n begin sz shared-sz]
+(defn- block-entity-size [shared-sz ids end capacity]
+  (loop [n 0 sz shared-sz]
     (if (= n end)
       sz
       (let [mem (.-mem (component-get (aget ids n)))]
@@ -401,21 +429,86 @@
                    (util/align sz)
                    (+ (* (component-size mem) capacity))))))))
 
-(defn- block-new [^Class class ^Group group size-hint]
-  (let [capacity (min size-hint max-block-size)
+(defn- block-new-shared [offset ids buf shared begin end]
+  (loop [n begin o offset]
+    (if (= n end)
+      o
+      (let [c (component-get (aget ids n))
+            m (.-mem c)
+            o (util/align (component-align m) o)]
+        (aset shared n (.ctor c buf o))
+        (recur (inc n) (+ o (component-size m)))))))
+
+(defn- block-new-arrays [offset ids buf arrays end]
+  )
+
+;; Views
+;; - object: separate
+;; - single: u8, u16, u32, i8, i16, i32, f32, f64
+;; - vector: ^
+;; - mixed :
+;;
+;; raw array:
+;; - whole block view, need ptr + index pairs, no value types in JS
+;;
+;; what wrapper does:
+;; - global object mutated to "slide" into view of the current component
+
+;; Queries
+;; - Everything stored here is consumed primarily by queries, optimize that
+;; - queries determine frequency of access (system, group, block, entity)
+;;   - per component, iterate at smallest frequency, instance others
+;;   - very similar to draw call dispatch, shader stages
+;; - data passed to query function, over system state, is what's important
+;;   - and data coming back, handle component writes (set to same buffer or different view)
+;;   - seem to indicate blocks to be made of 1 static buffer and multiple "dynamic" ones
+;;   - dont want to move entire block when adding/removing common components types (esp system/tags)
+;;   - support writing entire arrays to new buffers every frame (keep previous ver of destructive update)
+;;     - time travel, debugging, snapshots, etc
+;; - defined on component types, layout in entity blocks, consumed by queries
+
+;; different wrappers per access frequency:
+;; - per component has a sliding view (small reusable obj, typed view + offset -> BUILD MATHS AROUND THIS)
+;; - per block has the raw component's view
+;; - per group has the array of block IDs
+;; - per system has the group handle
+
+;; everything consumed by system functions
+;; - called at highest frequency, from components in the query
+;; - read-only components can have simpler wrappers (pass scalar directly, instead of wrapper with setter)
+
+(deftype Scalar [^:mutable value])
+(deftype Vector [view
+                 ^:mutable offset])
+
+
+
+;; TODO how to handle components with mixed buffer/object?
+;; - disallow? simpler implementation, splits high-level components manually
+;; - automatic split? component acts like two (one buffer, one object) -> screws up indexing, no longer 1:1 with class
+;; - no split, wrapper access? adds an indirection (wrapper -> array + object)
+;; OR
+;; - wrappers for every component? control access (buffer + offset, array + offset, temp view, scalar view)
+;; - already sorta need wrappers, otherwise JS is gonna get in the way
+;; - so what do?
+
+(defn- block-new [^Class class ^Group group count-hint]
+  (let [capacity (max block-min-cap (min block-max-cap count-hint))
         comps    (.-components class)
         class-k  (.-key class)
         n-shared (class-num-shared class-k)
         n-empty  (class-num-empty  class-k)
-        n-end    (+ n-shared n-empty)
-        o-shared (* 4 capacity) ; lookup size, shared offset
+        n-end    (- (alength comps) n-empty)
+        n-comps  (- n-end n-shared)
+        o-shared (* 4 capacity) ; lookup size, shared memory offset
         buf-sz   (-> o-shared
-                     (block-shared-size comps n-shared)
-                     (block-entity-size comps n-shared n-end capacity))
+                     (block-shared-size comps n-comps n-end)
+                     (block-entity-size comps n-comps capacity))
         buffer   (js/ArrayBuffer. buf-sz)
-        lookup   (js/Uint32Array. buffer o-shared capacity)
-        arrays   (js/Array. (- n-end n-shared))
-        shared   (js/Array. n-shared)
+        lookup   (js/Uint32Array. buffer 0 capacity)
+        arrays   (util/new-array n-comps)
+        shared   (util/new-array n-shared)
+        limits   (.-limits group)
         n-world  (world-block)
         n-group  (group-block group n-world)
         block    (->Block (block-key n-world n-group)
@@ -423,47 +516,70 @@
                           lookup arrays shared)]
     (aset (.-blocks *world*) n-world block)
     (aset (.-lookup *world*) n-world group)
-    ;; TODO create typed arrays & shared from buffer
-    ;; - create object arrays
+    (-> o-shared
+        (block-new-shared comps buffer shared n-comps n-end)
+        (block-new-arrays comps buffer arrays n-comps))
+    (-> (group-blocks limits) (inc)
+        (group-limits (group-allocs limits))
+        (->> (set! (.-limits group))))
     block))
 
-(defn- ^Block block-for [class ^Group group size-hint]
-  (let [total (group-blocks      (.-totals group))
+(defn- ^Block block-for [class ^Group group count-hint]
+  (let [total (group-blocks      (.-limits group))
         index (group-full-blocks (.-counts group))]
-    (if (not= first total)
+    (if (not= total index)
       (block-get (aget (.-blocks group) index))
-      (block-new class group size-hint))))
+      (block-new class group count-hint))))
+
+(defn- block-add [group block]
+  )
+
+(defn- block-del [group block]
+  )
 
 (defn- block-update [^Block block count]
-  (let [cap (.-size   block)
-        len (.-length block)]
-    (assert (not= count len))
-    (assert (<=   count cap))
+  (let [cap    (.-cap block)
+        allocs (block-allocs cap)
+        length (block-length cap)]
+    (assert (not= count length) "Nothing to update")
+    (assert (<=   count allocs) "Block overflow")
     (if (zero? count)
       nil ; TODO release block
-      (do (cond (= cap count) (block-del (.-layout block) block)
-                (= cap len)   (block-add (.-layout block) block))
-          (set! (.-length block) count)))))
+      (do (cond (= allocs count)  (block-del (.-layout block) block)
+                (= allocs length) (block-add (.-layout block) block))
+          (set! (.-cap block)  (block-cap count allocs))))))
 
-(defn- block-alloc [^Block block count]
-  (let [cap (.-size   block)
-        len (.-length block)]
-    (assert (not= cap len))
-    (let [num (js/Math.min count (- cap len))]
-      (block-update block (+ len num))
-      ;; (+= ) TODO increment entity count in block layout ?
+;; TODO grow blocks to `block-max-cap` unless class-fixed
+;; - need flag to lock blocks/entities in place anyways.
+(defn- block-grow [])
+
+(defn- block-alloc [^Block block ^Group group count]
+  (let [cap    (.-cap block)
+        allocs (block-allocs cap)
+        length (block-length cap)]
+    (assert (not= allocs length) "Full block") ; TODO grow
+    (let [num (min count (- allocs length))
+          new (+ length num)]
+      (block-update block new)
+      (when (and (= new allocs) ; Block is now full
+                 (or true ; TODO class-fixed
+                     (>= allocs block-max-cap)))
+        (let [c (.-counts group)]
+          (-> (group-full-blocks c) (inc)
+              (group-counts (group-class-index c))
+              (->> (set! (.-counts group))))))
       num)))
 
 (defn- entity-alloc [^Block block index count ids offset]
   (let [b (block-world-index (.-key block))
         l (.-lookup block)
-        i (.-index *world*)]
+        p (.-place *world*)]
     (dotimes [n count]
-      (let [id (aget ids (+ offset n))
+      (let [id (entity-index (aget ids (+ offset n)))
             e  (+ index n)
             k  (place-key b e)]
         (aset l e id)
-        (aset i id k)))))
+        (aset p id k)))))
 
 
 ;;; Query Views
@@ -549,13 +665,16 @@
   [^Class class ids]
   (let [g (group-for (.-key class))
         o 0 ; both mutable
-        n (world-alloc ids)]
+        n (world-alloc ids)
+        l (.-limits g)]
     (+= (.-total *world*) n)
-    (+= (.-total g) n)
+    (->> (group-allocs l) (+ n)
+         (group-limits (group-blocks l))
+         (set! (.-limits g)))
     (while (pos? n)
       (let [block (block-for class g n)
-            index (.-length block)
-            count (block-alloc block n)]
+            index (block-length (.-cap block))
+            count (block-alloc block g n)]
         (entity-alloc block index count ids o)
         (+= o count)
         (-= n count)))
@@ -602,18 +721,21 @@
   )
 
 ;; TODO having get/set make it an empty component
-(bllm.ecs/defc Name
+(ecs/defc Name
   "Unique display name of the entity. Optional, unnamed entity if missing."
   {:type :str
    :get  name-get
    :set  name-set})
 
-(bllm.ecs/defsys NameIndex
+(ecs/defsys NameIndex
   {:state #js []})
 
-(bllm.ecs/defc Tags
+(ecs/defc Tags
   "Semantic tags of the entity. Optional, assume 0 if missing."
   {:type :u32})
+
+(ecs/defc Enabled
+  "Marker for entities enabled and disabled regardless of component classes.")
 
 ;; TODO as a fundamental system
 (defn pre-tick []

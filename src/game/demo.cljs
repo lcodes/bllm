@@ -5,7 +5,10 @@
             [bllm.meta :as meta]
             [bllm.time :as time]
             [bllm.util :as util :refer [def1]]
-            [bllm.wgsl :as wgsl :refer [texture]]))
+            [bllm.wgsl :as wgsl :refer [texture]]
+            [bllm.view :as view]
+            [bllm.scene :as scene]
+            [bllm.cull :as cull]))
 
 ;; https://learnopengl.com/PBR/Theory
 ;; https://bruop.github.io/ibl/
@@ -20,9 +23,6 @@
 (wgsl/defconst PI-4 0.7853981633974483)
 (wgsl/defconst PI*2 6.2831853071795864)
 (wgsl/defconst EPSILON 1e-10)
-
-(wgsl/defstruct Test
-  hello :u32)
 
 (meta/defenum bind-group
   FRAME
@@ -998,18 +998,43 @@ fn demo_frag() -> @location(0) vec4<f32> {
 (ecs/defc TestIO
   {:io [TestScalar]})
 
-(def test-class
+(def Simple
+  (ecs/class scene/World))
+
+(def Test
   (ecs/class TestScalar TestScalarBuffer
              TestVector TestVectorBuffer
              TestObject TestObjectBuffer
              TestShared TestSharedBuffer
              TestStruct TestStructBuffer))
 
+(def Camera
+  (ecs/class
+   scene/World scene/Translation scene/Rotation
+   view/Camera view/Perspective view/Projection view/Frustum view/Target
+   cull/Mask ecs/Enabled))
+
+(def Sphere
+  (ecs/class
+   scene/World scene/Translation scene/ScalarScale
+   cull/Object cull/Sphere))
+
+(def Cube
+  (ecs/class
+   scene/World scene/Translation scene/Rotation scene/ScalarScale
+   cull/Object cull/AABB))
+
 (comment
   (js/console.log test-class)
+  (js/console.log Camera Sphere Cube)
 
   (set! ecs/*world* (ecs/world))
+  (def my-1st-entity (ecs/entity-from Simple))
+  (def entity-group (ecs/entities-from Sphere 500))
   (js/console.log ecs/*world*)
+
+
+
 
   )
 
