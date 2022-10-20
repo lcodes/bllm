@@ -169,6 +169,27 @@
   ;;loop   :bool
   )
 
+#_
+(ecs/defe Play
+  ;; Turn THIS entity into the sound instance -> EID becomes handle for stop/options/etc
+  ;; - TODO is an event required for playback? just have `play` directly create the entity
+
+  ;; what about sound vs music? pretty much the same except one usually buffered, other usually streamed
+  ;; - everything else, mixer, crossfades, etc is equally valid on buffers, streams or oscillators
+
+  ;; still want to match event type with resulting playback component
+  ;; - batch creation, simpler design; but dont want multiple user entry points (one `play` then dispatch)
+  ;; - determine asset type (generated, buffered, streamed) -> create entity & matching components -> wire
+  ;; - not that frequent an event; barely a handful per every few frames
+
+  ;; use event to trigger batch creation -> `play` as light as possible, batch everything else in system
+  )
+
+#_
+(ecs/defe Stop
+  ;; TODO buffer events, batch exec
+  )
+
 (ecs/defc Crossfade
   "One node's loss is another node's `Gain`."
   )

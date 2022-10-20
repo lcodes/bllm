@@ -119,6 +119,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn align [alignment-1 size]
+  (assert (nat-int? size))
   (bit-and (+ alignment-1 size) (bit-not alignment-1)))
 
 (defn array-copy [dst src]
@@ -133,8 +134,9 @@
   (doto (js/Uint32Array. length)
     (.fill value)))
 
-(defn ^js/Uint32Array bit-array [size]
-  (-> size (+ 31) (/ 32) js/Math.floor js/Uint32Array.))
+(defn ^js/Uint32Array bit-array [length]
+  (assert (nat-int? length))
+  (-> length (+ 31) (/ 32) js/Math.floor js/Uint32Array.))
 
 (defn bit-array-clear [bit-array idx]
   (let [n (/ idx 32)
@@ -142,6 +144,13 @@
     (->> (aget bit-array n)
          (bit-xor (bit-shift-left 1 i))
          (aset bit-array n))))
+
+(defn pack-array [length bits-per-element]
+  (assert (nat-int? length))
+  (assert (< 1 bits-per-element 32) "Use bit-array or Uint32Array")
+  (assert (and (not=  8 bits-per-element)
+               (not= 16 bits-per-element)) "Use Uint8Array or Uint16Array")
+  (-> length (+ (dec bits-per-element)) (/ 32) js/Math.floor js/Uint32Array.))
 
 
 ;;; Micro Logger

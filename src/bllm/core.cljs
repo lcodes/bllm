@@ -66,10 +66,10 @@
   ;; - need better control over build output -> separate systems in modules for workers to lazy load
   ;; - app will grow large, workers are specialized runners; like cells on the PS3, similar "limits"
 
-  (scene/tick) ; Deterministic updates based on hierarchy in transformation spaces.
-  (world/tick) ; Deterministic updates based on fixed-time and physics integration.
-  (anim/tick)  ; Deterministic updates based on delta-time and logical computation.
-  (ai/tick)    ; Deterministic updates based on lower-time and pseudo intelligence.
+  ;;(scene/tick) ; Deterministic updates based on hierarchy in transformation spaces.
+  ;;(world/tick) ; Deterministic updates based on fixed-time and physics integration.
+  ;;(anim/tick)  ; Deterministic updates based on delta-time and logical computation.
+  ;;(ai/tick)    ; Deterministic updates based on lower-time and pseudo intelligence.
 
   ;; TODO also where most "game" systems will end up, regardless of application
   ;; - pre-tick/post-tick reserved for side effects, not many of these systems

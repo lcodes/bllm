@@ -1,7 +1,6 @@
 (ns ^:figwheel-hooks cljs.user
   "Development entry point. Attaches a few strings before launching the app."
-  (:require [npm.stats.js  :as Stats]
-            [devtools.core :as devtools]
+  (:require [devtools.core :as devtools]
             [re-frame.core :as rf]
             [bllm.util     :as util :refer [def1]]
             [repl.app      :as app]
@@ -27,11 +26,10 @@
 
 ;; Launch the application right away. TODO setup dev plugins
 (def1 app-ctx
+  ;; TODO hitting format issues when expanding ecs/World; investigate later
   (do #_(devtools/install! [:formatters :hints]) ; TODO chrome devtools only
       (app/init fix-scripts)
       :ok))
-
-;; TODO hook Statsjs into the tick loop
 
 (defn ^:before-load on-before-load []
   (rf/clear-subscription-cache!))

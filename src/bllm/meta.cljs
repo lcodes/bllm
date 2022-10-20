@@ -1,4 +1,5 @@
 (ns bllm.meta
+  ;; TODO this is old, rethink all this - only using clojure side of meta so far
   "We heard you like data, so we used data to describe your data.
   Provides the foundations to compose modern interactive systems.
 

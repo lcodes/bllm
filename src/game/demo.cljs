@@ -1,14 +1,15 @@
 (ns game.demo
-  (:require [bllm.ecs :as ecs]
-            [bllm.gpu  :as gpu]
-            [bllm.disp :as disp]
-            [bllm.meta :as meta]
-            [bllm.time :as time]
-            [bllm.util :as util :refer [def1]]
-            [bllm.wgsl :as wgsl :refer [texture]]
-            [bllm.view :as view]
+  (:require [bllm.cull  :as cull]
+            [bllm.disp  :as disp]
+            [bllm.ecs   :as ecs]
+            [bllm.gpu   :as gpu]
+            [bllm.meta  :as meta]
+            [bllm.phys  :as phys]
             [bllm.scene :as scene]
-            [bllm.cull :as cull]))
+            [bllm.time  :as time]
+            [bllm.util  :as util :refer [def1]]
+            [bllm.view  :as view]
+            [bllm.wgsl  :as wgsl :refer [texture]]))
 
 ;; https://learnopengl.com/PBR/Theory
 ;; https://bruop.github.io/ibl/
@@ -985,6 +986,18 @@ fn demo_frag() -> @location(0) vec4<f32> {
   a :str
   b :u32)
 
+(ecs/defc TestBool
+  {:type :bool}) ; 1 bit per component
+
+(ecs/defc TestBoolBuffer
+  {:type :bool :size 3}) ; 3 bits per component
+
+(ecs/defc TestBits
+  {:type :u5}) ; 5 bits per component
+
+(ecs/defc TestBitsBuffer
+  {:type :u5 :size 10}) ; 50 bits per component
+
 (ecs/defc TestIn
   {:in [TestScalar]
    :type :f32})
@@ -1008,21 +1021,106 @@ fn demo_frag() -> @location(0) vec4<f32> {
              TestShared TestSharedBuffer
              TestStruct TestStructBuffer))
 
-(def Camera
-  (ecs/class
-   scene/World scene/Translation scene/Rotation
-   view/Camera view/Perspective view/Projection view/Frustum view/Target
-   cull/Mask ecs/Enabled))
+;; Actor -> Logical game object, made of logical entities, made of data components
+;; - Scene -> transform
+;; - Visual -> mesh & material
+;; - Physics -> dynamics & collisions
+;; - Culling -> mask & region
 
-(def Sphere
-  (ecs/class
-   scene/World scene/Translation scene/ScalarScale
-   cull/Object cull/Sphere))
+;; how about databases?
+;; - datomic has "components" for sub-entities, same thing
+;; - SQL stores the primary key and joins on it to get another table's associated row
+;; - nosql embeds it, no
+;; - kafka streams everything, no structure
+;; - key/val stores dont work too well over multiple objects, redis has lua
 
-(def Cube
-  (ecs/class
-   scene/World scene/Translation scene/Rotation scene/ScalarScale
-   cull/Object cull/AABB))
+;; how to make convenient?
+;; - entities shouldnt care, they're just dynamic views of component arrays
+;; - actor should know in which entity a component goes, quick access to entity kinds
+;; - ie Visual entity will change class, but is always a Visual
+;;   - physics could have no collision, or get a Sleep tag, but it is always a Body
+;;   - culling could be from AABB, spheres, points, with or without regions, always a cull Object
+;; - need to know about links -> ie most entities refer to the world transform
+;;   - visual is after culling, with a matching object, physics is before scene transforms
+;;
+;;
+;;
+
+(def SceneNode (ecs/class scene/World))
+
+;; TODO class parameter to class expands components -> quick reuse, extend without refactor, no runtime hierarchy
+;;(def SceneTR (ecs/class SceneNode scene/Translation scene/Rotation))
+
+;;(def SceneTRS (ecs/class SceneNode scene/Scale))
+
+#_(def CullBox (ecs/class cull/Object cull/AABB ecs/Enabled ecs/Actor))
+
+;; really thin wrapper over `class` with extra validations, no new semantics
+;; - except an implicitly added `Actor` tag component
+;; - instances named after the actor kind in debug/development/editor modes (dont bother in engine mode, unless explicitly requested)
+(comment
+ (def Camera
+   (ecs/class
+    view/Camera view/Perspective view/Projection view/Frustum view/Target
+    cull/Mask ecs/Enabled
+
+    scene/World scene/Translation scene/Rotation
+    ))
+
+ (def Sphere
+   (ecs/class
+    scene/World scene/Translation scene/Scale
+
+    phys/RigidBody
+
+    cull/Object cull/Sphere ecs/Enabled
+
+    ;; TODO mesh (buffer idx, offset, count, etc)
+    ;; TODO material (shader idx, param components)
+    ))
+
+ (def Cube
+   (ecs/actor
+    SceneTRS
+    phys/RigidBody
+
+    CullBox
+
+    ;; TODO mesh & material
+    ))
+
+ (def Ground
+   (ecs/class
+    scene/World scene/Translation scene/Rotation scene/Scale
+
+    ;; TODO static body
+
+    cull/object cull/AABB ecs/Enabled
+
+    ;; TODO mesh & material
+    ))
+
+
+ (def camera (ecs/entity-from Camera))
+ (def ground (ecs/entity-from Ground)) ; creates multiple entities (scene, physics, culling, rendering, shading)
+
+ ;; queries normally connects data; direct access is still possible, and what queries build on top of
+ ;; actor -> entity -> component
+ ;; components should be unique across entire actor; entities are subgroups of components for block storage
+ ;; actors are the true logical entities the game logic cares about, they bind together groups of components
+ ;; - make it possible to answer queries on groups of entities; actors being entities allow groups of actors
+ (def scene-ground (ecs/get ground scene/World))
+ (def ground-world (ecs/get scene-ground scene/World))
+
+ ;; less important if more indirections here, if it means batches have less
+
+ (def spheres (ecs/entities-from Sphere 5000))
+ ;; here, how to set the world pos of few specific spheres? entities could be across different blocks
+ ;; same as individual; doing it with query could batch across blocks, outside system (same mechanism as systems build on)
+
+ (ecs/doquery {:select [w scene/World] :from spheres}
+              (js/console.log w))
+ )
 
 (comment
   (js/console.log test-class)
@@ -1030,7 +1128,7 @@ fn demo_frag() -> @location(0) vec4<f32> {
 
   (set! ecs/*world* (ecs/world))
   (def my-1st-entity (ecs/entity-from Simple))
-  (def entity-group (ecs/entities-from Sphere 500))
+  (def entity-group (ecs/entities-from Sphere 5000))
   (js/console.log ecs/*world*)
 
 

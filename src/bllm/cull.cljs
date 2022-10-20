@@ -1,17 +1,21 @@
 (ns bllm.cull
-  (:require [bllm.ecs  :as ecs]
-            [bllm.view :as view]))
+  (:require [bllm.ecs   :as ecs]
+            [bllm.scene :as scene]
+            [bllm.view  :as view]))
+
+;; TODO entity components? need a way to separate actors from entities from components
+;; - but actors's components are entities, and entities's components are components
+;; - system queries don't care (ie query cull objects, join into scene world matrices)
+(ecs/defc ^:entity Object
+  "A culling object simply defines its own culling mask.
+
+  A bounding component is also required to make it active."
+  {:type :u32 :init 0xffffffff})
 
 (ecs/defc Mask
   "Attached to a camera to filter the culling objects it can see in the scene.
 
   Cameras with no culling mask match on all objects inside the view frustum."
-  {:type :u32 :init 0xffffffff})
-
-(ecs/defc Object
-  "A culling object simply defines its own culling mask.
-
-  A bounding component is also required to make it active."
   {:type :u32 :init 0xffffffff})
 
 (ecs/defc Point

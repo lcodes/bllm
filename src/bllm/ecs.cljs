@@ -20,50 +20,62 @@
   10)
 
 (cli/defvar block-min-cap 32)
-(cli/defvar block-max-cap 1024)
+(cli/defvar block-max-cap 4096) ; 4096 hard limit from 12-bit indexing
 
-(def1 ^:private version
-  "Incremented on structural changes to mark existing worlds dirty."
-  0)
+;; TODO handle id/hash collisions -> better hashing, kind bits, ns bits, etc
+(def1 ^:private id->hash (js/Map.))
 
 (def1 ^:private id->index (js/Map.))
-(def1 ^:private id->links (js/Map.))
-(def1 ^:private id->hash  (js/Map.))
 
-(def1 ^:private systems-num 0)
-(def1 ^:private systems (js/Array. 100))
-
-(def1 ^:private components-num 0)
-(def1 ^:private components (js/Array. 200))
+(def1 ^:private index->links (js/Map.))
 
 (def1 ^:private classes-num 0)
 (def1 ^:private classes (js/Array. 400))
 
+(def1 ^:private components-num 0) ; TODO rename to structs? CSS is now Class-Struct-System, naming is hard
+(def1 ^:private components (js/Array. 200))
+
 (def1 ^:private queries-num 0)
-(def1 ^:private queries (js/Array. 300))
+(def1 ^:private queries (js/Array. 200))
 
-(comment (js/console.log id->index)
-         (js/console.log id->links)
-         (js/console.log id->hash)
+(def1 ^:private systems-num 0)
+(def1 ^:private systems (js/Array. 100))
 
-         (js/console.log (.slice systems    0 systems-num   ))
+(comment (js/console.log "data" id->index
+                         "hash" id->hash
+                         "rels" index->links)
+         (js/console.log *world* version)
+
          (js/console.log (.slice components 0 components-num))
-         (js/console.log (.slice classes    0 classes-num   )))
+         (js/console.log (.slice classes    0 classes-num   ))
+         (js/console.log (.slice queries    0 queries-num   ))
+         (js/console.log (.slice systems    0 systems-num   )))
 
-;; TODO "placed" blocks: guaranteed not to move, always changes layout in batch
-;; - any uses? entities inside can still move, unless that can be enforced too?
-;; - ie static scene content; already chunked by region and matches load units.
-;; - adding/removing tags to perform system updates -> no existing blocks / too small.
-;;
-;; not for all content, but good to have when needed
+(meta/defbits class-key
+  class-index     19  ; 512k class definitions.
+  class-linked     1  ; Whether this class contains linked entities.
+  class-num-shared 6  ; Up to 64 shared components per class.
+  class-num-empty  6) ; Up to 64 empty components per class.
 
+(meta/defbits group-limits
+  group-blocks 12  ; Allocated. May not all be full, or empty.
+  group-allocs 20) ; 1m entities across all blocks.
 
-;;; Entity Worlds
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(meta/defbits group-counts
+  group-full-blocks 12  ; Index of the first free block. Matches group limits.
+  group-class-index 19) ; 512k possible classes. Matches class key.
+
+(meta/defbits block-key
+  block-world-index 20  ; 1m entity blocks per world. Matches place limit.
+  block-group-index 12) ; 4k possible blocks per entity class.
+
+(meta/defbits block-cap
+  block-length 12 ; 4k possible entities per block. Matches place limit.
+  block-allocs 12)
 
 (meta/defbits entity-key
   "Logical handle to a specific entity. Remains valid after structural changes."
-  entity-index 24 ; 16m entities, reused before pushing the highest ID
+  entity-index 22 ; 4m entities, reused before pushing the highest ID
   entity-ver   8) ; 256 versions, odds of collisions across cycles should be low
 
 (meta/defbits place-key
@@ -71,7 +83,54 @@
   block-index 20  ; 1m blocks per world
   place-index 12) ; 4k entities per block
 
-;; TODO need a system lookup (system-index -> system state for this world)
+(meta/defbits ^:transient query-key
+  query-index 20) ; 1m query definitions.
+
+(meta/defflag query-flags
+  {:from 20}
+  query-filter-output)
+
+(meta/defbits component-key
+  "A component's key acts as it's definition index, its element count and flags.
+
+  See `component-opts` to use the key as a bitfield."
+  component-index 16 ; 65k component definitions.
+  component-array 4) ; 16 inline elements.
+
+(meta/defflag component-opts
+  "Flags complementing the `component-key` constituents."
+  {:from 20} ; TODO from constant expr (component-key-bits ?)
+  component-static  ; Component doesn't affect entity layout, separate store. TODO rethink this
+  component-system  ; Component belongs to a system, not deleted with entity.
+  component-shared  ; Component belongs to a components block, not an entity.
+  component-buffer  ; Component stored in `ArrayBuffer`, `SharedArrayBuffer`.
+  component-wrapper ; Access the component through the block's `DataView`. TODO
+  component-typed   ; Access the component through a block's `TypedArray`. TODO
+  component-empty   ; Component has no data, acting as an entity tag only.
+  component-linked) ; Component is a direct place link between two entities.
+
+(meta/defbits component-mem
+  "Memory requirements for components with values stored in an `ArrayBuffer`."
+  component-align 4
+  component-size 12)
+
+(meta/defbits query-info
+  query-num-disabled 8  ; Component IDs preventing this query from matching.
+  query-num-required 8  ; Component IDs required to be present for a match.
+  query-num-optional 8  ; Component IDs are either read if present or nil.
+  query-num-written  8) ; Component IDs this query writes to.
+
+(meta/defbits ^:transient system-key
+  system-id 20) ; 1m system definitions.
+
+(meta/defflag system-opts
+  {:from 20}
+  system-empty  ; Pseudo system without queries, used as anchor points.
+  system-group  ; System acting as a scheduling container for other systems.
+  system-async  ; System execution is triggered from async events, ie coroutines.
+  system-check  ; Performs sanity checks to warn about errors before they happen.
+  system-debug) ; Development-only system usually to introspecting other systems.
+
 (deftype World [total   ; Number of allocated entities in this World.
                 version ; Used to trigger data remaps on structural changes.
                 systems ; Units of work streaming. Batch processors of queries.
@@ -85,22 +144,51 @@
                 place   ; Lookup of `entity` IDs to block and place indices.
                 check]) ; Current version numbers of allocated entities.
 
-(defn world
-  "Creates an empty ECS `World`."
-  ([]
-   (world default-world-entities default-world-blocks))
-  ([initial-entity-count initial-block-count]
-   (->World 0 0
-            #js []    ; World specific state for all entity component `systems`.
-            (js/Map.) ; Component `queries` keep references inside block arrays.
-            (js/Map.) ; Class `groups` maintain their blocks, resolve queries.
-            (js/Array. systems-num) ; System `states` resolved by system index.
-            (js/Array. initial-block-count) ; Group `lookup` for every block.
-            (js/Array. initial-block-count) ; Entity `blocks` store components.
-            (util/bit-array initial-block-count)     ; index
-            (util/bit-array initial-entity-count)    ; usage
-            (util/u32-array initial-entity-count -1) ; place
-            (js/Uint8Array. initial-entity-count)))) ; check
+;; Classes are used to organize component arrays into logical entity blocks.
+(deftype Class [key        ; class index & special component counts.
+                components ; `component-id` elements. Shared first, empty last.
+                queries])  ; queries matching on groups & blocks of this class.
+
+;; Groups are class instances for a specific world, responsible for blocks.
+;; Queries then pull data directly from arrays of the blocks they match on.
+(deftype Group [limits  ; Total number of entities and blocks for this group.
+                counts  ; Index to class data and to the first free block.
+                blocks  ; Indices to all blocks made from this group's class.
+                views]) ; Active block observers.
+
+;; Blocks provide storage for entity batches. Data-oriented-design as JS allows.
+(deftype Block [key      ; Index of the block in world and group arrays.
+                cap      ; Packed count and capacity of allocated entities.
+                lookup   ; Entity lookup, maps `place-index` to world `entity`.
+                arrays   ; Component data views. Uses at most one `ArrayBuffer`.
+                shared]) ; Instanced components. Each item is a block singleton.
+
+;; Component types specify how to instantiate data arrays inside entity blocks.
+;; They are referenced by queries to match layouts and perform I/O over arrays.
+(deftype Component [key    ; Index, array size & option flags.
+                    mem    ; Memory sizes, per entity and per block.
+                    type   ; Unique type. Implements component data access.
+                    ctor   ; Array constructor.
+                    init   ; Value initializer.
+                    ins    ; Input components.
+                    outs]) ; Output components.
+
+(deftype Query [key
+                info
+                components
+                classes]) ; Class IDs this query matched with.
+
+(deftype View []) ; TODO instanced query for specific world
+
+(deftype System [key    ; Unique identifier and option flags.
+                 hash   ; Content hash to detect live changes.
+                 ctor]) ; State constructor for World instances.
+
+;; TODO system graph representation (parent, siblings)
+
+(def1 ^:private version
+  "Incremented on structural changes to mark existing worlds dirty."
+  0)
 
 ;; REPL commands sent to root binding.
 ;; Simulation binds its own world every frame.
@@ -109,7 +197,59 @@
 ;; Speculative evaluation binds a copy-on-write clone of the current world.
 (def1 ^:dynamic ^World *world* nil)
 
+(defn ^Class class-get
+  [idx]
+  (aget classes idx))
+
+(defn ^Block block-get
+  [idx]
+  (aget (.-blocks *world*) idx))
+
+(defn ^Component component-get
+  "Returns an existing `Component` given its `component-index`."
+  [idx]
+  (aget components idx))
+
+(defn ^Query query-get
+  [idx]
+  (aget queries idx))
+
+(defn ^System system-get
+  [idx]
+  (aget systems idx))
+
+;; TODO "placed" blocks: guaranteed not to move, always changes layout in batch
+;; - any uses? entities inside can still move, unless that can be enforced too?
+;; - ie static scene content; already chunked by region and matches load units.
+;; - adding/removing tags to perform system updates -> no existing blocks / too small.
+;;
+;; not for all content, but good to have when needed
+
+
+;;; Entity Worlds
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn world
+  "Creates an empty ECS `World`."
+  ([]
+   (world default-world-entities default-world-blocks))
+  ([initial-entity-count initial-block-count]
+   (let [ec (util/align 31 initial-entity-count) ; Always fill bit-array words
+         bc (util/align 31 initial-block-count)] ; in `index` and `usage`.
+     (->World 0 0
+              #js []    ; Active entity `systems`, directly holds query functions.
+              (js/Map.) ; Component `queries` keep references inside block arrays.
+              (js/Map.) ; Class `groups` maintain their blocks, resolve queries.
+              (js/Array. systems-num) ; System `states` resolved by system index.
+              (js/Array. bc) ; Group `lookup` for every block.
+              (js/Array. bc) ; Entity `blocks` store components.
+              (util/bit-array bc)     ; index
+              (util/bit-array ec)     ; usage
+              (util/u32-array ec -1)  ; place
+              (js/Uint8Array. ec))))) ; check
+
 (defn- world-block
+  "Reserves a `Block` index in the current world."
   []
   (let [mem (.-index *world*)]
     (util/doarray [bits n mem]
@@ -122,6 +262,7 @@
     (assert false "TODO block index full")))
 
 (defn- world-block-free
+  "Releases a `Block` index and associated references."
   [idx]
   (aset (.-blocks *world*) idx nil)
   (util/bit-array-clear (.-index *world*) idx))
@@ -169,48 +310,35 @@
     (js/console.log out))
   )
 
+(defn- entity-alloc [^Block block index count ids offset]
+  (let [b (block-world-index (.-key block))
+        l (.-lookup block)
+        p (.-place *world*)]
+    (dotimes [n count]
+      (let [id (entity-index (aget ids (+ offset n)))
+            e  (+ index n)
+            k  (place-key b e)]
+        (aset l e id)
+        (aset p id k)))))
 
-;;; Component Types
+(defn- query*class [^Query query ^Class class]
+  (let [^js/Uint16Array
+        ids  (.-components class)
+        comp (.-components query)
+        info (.-info       query)
+        n-disabled (query-num-disabled info)
+        n-required (query-num-required info)]
+    (util/dorange [n 0 n-disabled]
+      (when-not (.includes ids (aget comp n))
+        (util/return false)))
+    (util/dorange [n n-disabled (+ n-disabled n-required)]
+      (when (.includes ids (aget comp n))
+        (util/return false)))
+    true))
+
+
+;;; Entity Component Definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(meta/defbits component-key
-  "A component's key acts as it's definition index, its element count and flags.
-
-  See `component-opts` to use the key as a bitfield."
-  component-index 16 ; Up to 65k component types.
-  component-array 4) ; Up to 16 inline elements.
-
-(meta/defflag component-opts
-  "Flags complementing the `component-key` constituents."
-  {:from 20} ; TODO from constant expr (component-key-bits ?)
-  component-static  ; Component doesn't affect entity layout, separate store. TODO rethink this
-  component-system  ; Component belongs to a system, not deleted with entity.
-  component-shared  ; Component belongs to a components block, not an entity.
-  component-buffer  ; Component stored in `ArrayBuffer`, `SharedArrayBuffer`.
-  component-wrapper ; Access the component through the block's `DataView`. TODO
-  component-typed   ; Access the component through a block's `TypedArray`. TODO
-  component-empty   ; Component has no data, acting as an entity tag only.
-  component-linked) ; Component is a direct place link between two entities.
-
-(meta/defbits component-mem
-  "Memory requirements for components with values stored in an `ArrayBuffer`."
-  component-align 4
-  component-size 12)
-
-;; Component types specify how to instantiate data arrays inside entity blocks.
-;; They are referenced by queries to match layouts and perform I/O over arrays.
-(deftype Component [key    ; Index, array size & option flags.
-                    mem    ; Memory sizes, per entity and per block.
-                    type   ; Unique type. Implements component data access.
-                    ctor   ; Array constructor.
-                    init   ; Value initializer.
-                    ins    ; Input components. (From `:require`)
-                    outs]) ; Output components. (From `:target`)
-
-(defn- ^Component component-get
-  "Returns an existing `Component` given its `component-index`."
-  [idx]
-  (aget components idx))
 
 (defn component
   "Registers a new component structure type."
@@ -244,55 +372,11 @@
 ;; TODO component array allocation, management & access
 
 
-;;; Entity Classes, World Groups and State Blocks
+;;; Entity Class Definitions
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(meta/defbits class-key
-  class-index     19  ; 512k possible entity classes.
-  class-linked     1  ; Whether this class contains linked entities.
-  class-num-shared 6  ; Up to 64 shared components per class.
-  class-num-empty  6) ; Up to 64 empty components per class.
-
-(meta/defbits group-limits
-  group-blocks 12  ; Allocated. May not all be full, or empty.
-  group-allocs 20) ; 16m entities across all blocks. Matches world limit.
-
-(meta/defbits group-counts
-  group-full-blocks 12  ; Index of the first free block. Matches group limits.
-  group-class-index 19) ; 512k possible classes. Matches class key.
-
-(meta/defbits block-key
-  block-world-index 20  ; 1m entity blocks per world. Matches place limit.
-  block-group-index 12) ; 4k possible blocks per entity class.
-
-(meta/defbits block-cap
-  block-length 12 ; 4k possible entities per block. Matches place limit.
-  block-allocs 12)
-
-;; Classes are used to organize component arrays into logical entity blocks.
-(deftype Class [key          ; class index & special component counts.
-                components]) ; `component-id` elements. Shared first, empty last.
-
-;; Groups are class instances for a specific world, responsible for blocks.
-;; Queries then pull data directly from arrays of the blocks they match on.
-(deftype Group [limits    ; Total number of entities and blocks for this group.
-                counts    ; Index to class data and to the first free block.
-                blocks    ; Indices to all blocks made from this group's class.
-                queries]) ; Active block observers.
-
-;; Blocks provide storage for entity batches. Data-oriented-design as JS allows.
-(deftype Block [key      ; Index of the block in world and group arrays.
-                cap      ; Packed count and capacity of allocated entities.
-                lookup   ; Entity lookup, maps `place-index` to world `entity`.
-                arrays   ; Component data views. Uses at most one `ArrayBuffer`.
-                shared]) ; Instanced components. Each item is a block singleton.
 
 (def ^:private class-build-n 0)
 (def ^:private class-builder util/temp-u32)
-
-(defn ^Class class-get [idx] (aget classes idx))
-
-(defn ^Block block-get [idx] (aget (.-blocks *world*) idx))
 
 (defn- class-build-add [k]
   (let [x (bit-or k (cond (pos? (bit-and k component-shared)) 0x20000000
@@ -362,19 +446,21 @@
     (let [id (class-build-gen)]
       (if-let [idx (.get id->index id)]
         (class-get idx)
-        (let [idx (++ classes-num)
+        (let [q   (js/Set.)
+              idx (++ classes-num)
               key (class-key idx
                              (class-bit component-keys from component-linked)
                              (class-sum component-keys from component-shared)
                              (class-sum component-keys from component-empty))
               ids (js/Uint16Array. class-build-n) ; TODO from bump alloc?
-              cls (->Class key ids)]
+              cls (->Class key ids q)]
           ;; Gather component indices, discard sort bits.
           (dotimes [n class-build-n]
             (->> (aget class-builder n)
                  (component-index)
                  (aset ids n)))
-          ;; TODO match against existing queries
+          (dotimes [n queries-num]
+            ())
           (.set id->index id idx)
           (aset classes idx cls)
           cls)))))
@@ -387,6 +473,9 @@
                          (class Name Tags)
                          (class Tags Name)
                          (class Name Tags Enabled)))
+
+;;; World Groups (Entity classes instanced in a specific world)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- group-for
   "Get the group corresponding to the given class key in the current world."
@@ -408,6 +497,10 @@
         (aset index i world-index)
         (util/return i)))
     (assert false "TODO group blocks full")))
+
+
+;;; State Blocks (Entity batches instanced in a specific group)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn- block-shared-size [init-sz ids begin end]
   (loop [n begin sz init-sz]
@@ -570,57 +663,38 @@
               (->> (set! (.-counts group))))))
       num)))
 
-(defn- entity-alloc [^Block block index count ids offset]
-  (let [b (block-world-index (.-key block))
-        l (.-lookup block)
-        p (.-place *world*)]
-    (dotimes [n count]
-      (let [id (entity-index (aget ids (+ offset n)))
-            e  (+ index n)
-            k  (place-key b e)]
-        (aset l e id)
-        (aset p id k)))))
-
 
 ;;; Query Views
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(deftype Query [key
-                hash
-                disabled  ; Component IDs preventing this query from matching.
-                required  ; Component IDs required to be present for a match.
-                optional  ; Component IDs are either read if present or nil.
-                writes    ; Component IDs this query writes to.
-                layouts]) ; Layout IDs this query matches with.
-
-(deftype View [])
+(defn- query-hash [components]
+  (let [hash 0]
+    (util/doarray [id components]
+      (js* "~{} ^= ~{}" hash (bit-shift-left id (bit-and id 0xF))))
+    hash))
 
 (defn query
-  []
-  )
+  [id opts components num-disabled num-required num-optional num-written]
+  (let [info (query-info num-disabled num-required num-optional num-written)
+        hash (bit-xor info (query-hash components))] ; TODO poor man's hash
+    (if (= hash (.get id->hash id))
+      (query-get (.get id->index id))
+      (let [c (js/Set.)
+            n (++ queries-num)
+            k (bit-or n opts)
+            q (->Query k info (js/Uint16Array. components) c)]
+        (.set id->hash id hash)
+        (.set id->index id n)
+        (aset queries n q)
+        (dotimes [i classes-num]
+          (when (query*class q (class-get i))
+            (.add c i)))
+        q))))
 
 
 ;;; System Batches
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(meta/defbits ^:transient system-key
-  system-id 20)
-
-(meta/defflag system-opts
-  {:from 20}
-  system-empty  ; Pseudo system without queries, used as anchor points.
-  system-group  ; System acting as a scheduling container for other systems.
-  system-async  ; System execution is triggered from async events, ie coroutines.
-  system-check  ; Performs sanity checks to warn about errors before they happen.
-  system-debug) ; Development-only system usually to introspecting other systems.
-
-(deftype System [key   ; Unique identifier and option flags.
-                 hash  ; Content hash to detect live changes.
-                 ctor  ; State constructor for World instances.
-                 data  ; Resolved query IDs. Queries model the flow graph.
-                 code] ; Functions associated with every query for this system.
-  IHash
-  (-hash [_] hash))
 ;; global frame execution is a materialized view of [state-delta query-function query-params ...]
 ;; frame execution just streams through that like microcode; reverse polish notation? Forth interesting model here
 
@@ -641,14 +715,36 @@
   Finally, frame tick ordering is determined from hints specified on systems,
   usually a parent system and preferred position relative to sibblings. These
   form the links of a system graph, which is then topologically sorted."
-  [id hash opts ctor queries code]
-  #_(let [id (system-id key)]
-    (when-let [existing (.get types id)]
-      ;; TODO replace existing, reinit state, update query ref-counts
-      )
-    (let [sys (->System key hash ctor nil code)] ; TODO resolve queries
-      (.set types id sys)
-      id)))
+  [id hash opts ctor]
+  (if (= hash (.get id->hash id))
+    (system-get (.get id->index id))
+    (do (.set id->hash id hash)
+        (let [cur (.get id->index id)
+              idx (or cur (++ systems-num))]
+          (if-not cur
+            (.set id->index id idx)
+            (let [existing (system-get idx)]
+              ;; TODO reinit state, update queries
+              ))
+          (let [key (bit-or idx opts)
+                sys (->System key hash ctor)]
+            (aset systems idx sys)
+            sys)))))
+
+(defn tick
+  "Lightweight system controlling the execution of other systems."
+  []
+  )
+
+(defn event
+  "Lightweight system dispatching pending entity events."
+  [id]
+  )
+
+(defn sync
+  "Lightweight system executing pending entity changes."
+  []
+  )
 
 ;; TODO lightweight rust-like lifetime semantics -> only tracking high level systems flow
 ;; - far simpler than entity flow -> just tracking links between a graph of batches now
@@ -720,22 +816,32 @@
   ;; - update name in system
   )
 
-;; TODO having get/set make it an empty component
-(ecs/defc Name
+;; TODO static doesnt affect layout, get/set forward accesses to system state
+(ecs/defc ^:static Name
   "Unique display name of the entity. Optional, unnamed entity if missing."
   {:type :str
    :get  name-get
    :set  name-set})
 
 (ecs/defsys NameIndex
-  {:state #js []})
+  {:state #js []}) ; TODO query-less systems as "world components"
 
 (ecs/defc Tags
   "Semantic tags of the entity. Optional, assume 0 if missing."
-  {:type :u32})
+  {:type :u32
+   :init 0})
 
 (ecs/defc Enabled
   "Marker for entities enabled and disabled regardless of component classes.")
+
+(ecs/defc SByte {:type :i8})
+(ecs/defc Short {:type :i16})
+(ecs/defc Int {:type :i32})
+(ecs/defc Byte {:type :u8})
+(ecs/defc UShort {:type :u16})
+(ecs/defc UInt {:type :u32})
+(ecs/defc Float {:type :f32})
+(ecs/defc Double {:type :f64})
 
 ;; TODO as a fundamental system
 (defn pre-tick []

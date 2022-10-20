@@ -12,6 +12,7 @@
 
 ;; TODO https://github.com/google/draco#javascript-decoder-api
 
+(set! *warn-on-infer* true)
 
 (meta/defenum gl
   byte                   0x1400
